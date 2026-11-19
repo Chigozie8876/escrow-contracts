@@ -213,13 +213,8 @@ fn resolve_with_evidence_pays_out_and_records_the_hash() {
     let c = Ctx::new();
     let id = disputed(&c);
     let hash = BytesN::from_array(&c.env, &[7u8; 32]);
-    c.client.resolve_with_evidence(
-        &c.arbiter,
-        &id,
-        &Some(c.winner.clone()),
-        &10_000,
-        &hash,
-    );
+    c.client
+        .resolve_with_evidence(&c.arbiter, &id, &Some(c.winner.clone()), &10_000, &hash);
     assert_eq!(c.client.get_bounty(&id).status, Status::Resolved);
 
     // Events of the last invocation: the evidence record comes last.
