@@ -5,7 +5,7 @@ pub const MAX_FEE_BPS: u32 = 1_000;
 
 fn mul_div(amount: i128, bps: u32) -> Result<i128, Error> {
     amount
-        .checked_mul(bps as i128)
+        .checked_mul(i128::from(bps))
         .map(|v| v / BPS_DENOMINATOR)
         .ok_or(Error::Overflow)
 }
@@ -17,7 +17,7 @@ pub fn fee(amount: i128, bps: u32) -> Result<i128, Error> {
 
 /// amount - fee; rounding dust goes to the receiver.
 pub fn net(amount: i128, bps: u32) -> Result<i128, Error> {
-    Ok(amount - fee(amount, bps)?)
+    amount.checked_sub(fee(amount, bps)?).ok_or(Error::Overflow)
 }
 
 /// floor(amount * winner_bps / 10_000); dust stays with the maintainer.
@@ -31,6 +31,18 @@ pub fn share(net: i128, share_bps: u32) -> Result<i128, Error> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::cast_lossless,
+    reason = "tests may panic on unexpected results and use plain arithmetic to compute expected values"
+)]
 mod tests {
     use super::*;
 

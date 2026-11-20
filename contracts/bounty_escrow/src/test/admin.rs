@@ -83,6 +83,102 @@ fn set_admin_needs_both_auths() {
 }
 
 #[test]
+fn old_admin_loses_every_admin_entry_point_after_handover() {
+    let c = Ctx::new();
+    let old_admin = c.admin.clone();
+    let new_admin = Address::generate(&c.env);
+    c.client.set_admin(&old_admin, &new_admin);
+    let wasm_hash = c.env.deployer().upload_contract_wasm(WASM);
+
+    assert_eq!(
+        c.client.try_set_fee(&old_admin, &1).unwrap_err().unwrap(),
+        Error::Unauthorized
+    );
+    assert_eq!(
+        c.client
+            .try_set_relayer(&old_admin, &new_admin)
+            .unwrap_err()
+            .unwrap(),
+        Error::Unauthorized
+    );
+    assert_eq!(
+        c.client
+            .try_set_arbiter(&old_admin, &new_admin)
+            .unwrap_err()
+            .unwrap(),
+        Error::Unauthorized
+    );
+    assert_eq!(
+        c.client
+            .try_set_treasury(&old_admin, &new_admin)
+            .unwrap_err()
+            .unwrap(),
+        Error::Unauthorized
+    );
+    assert_eq!(
+        c.client.try_set_grace(&old_admin, &1).unwrap_err().unwrap(),
+        Error::Unauthorized
+    );
+    assert_eq!(
+        c.client
+            .try_set_durations(&old_admin, &1, &2)
+            .unwrap_err()
+            .unwrap(),
+        Error::Unauthorized
+    );
+    assert_eq!(
+        c.client
+            .try_set_token(&old_admin, &c.token, &1, &UNIT)
+            .unwrap_err()
+            .unwrap(),
+        Error::Unauthorized
+    );
+    assert_eq!(
+        c.client
+            .try_remove_token(&old_admin, &c.token)
+            .unwrap_err()
+            .unwrap(),
+        Error::Unauthorized
+    );
+    assert_eq!(
+        c.client.try_pause(&old_admin).unwrap_err().unwrap(),
+        Error::Unauthorized
+    );
+    assert_eq!(
+        c.client.try_unpause(&old_admin).unwrap_err().unwrap(),
+        Error::Unauthorized
+    );
+    assert_eq!(
+        c.client
+            .try_set_dispute_timeout(&old_admin, &1)
+            .unwrap_err()
+            .unwrap(),
+        Error::Unauthorized
+    );
+    assert_eq!(
+        c.client
+            .try_upgrade(&old_admin, &wasm_hash)
+            .unwrap_err()
+            .unwrap(),
+        Error::Unauthorized
+    );
+
+    // The new admin is accepted by every admin family, including upgrade.
+    c.client.set_fee(&new_admin, &1);
+    c.client.set_relayer(&new_admin, &old_admin);
+    c.client.set_arbiter(&new_admin, &old_admin);
+    c.client.set_treasury(&new_admin, &old_admin);
+    c.client.set_grace(&new_admin, &1);
+    c.client.set_durations(&new_admin, &1, &2);
+    c.client.set_token(&new_admin, &c.token, &1, &UNIT);
+    c.client.remove_token(&new_admin, &c.token);
+    c.client.pause(&new_admin);
+    c.client.unpause(&new_admin);
+    c.client.set_dispute_timeout(&new_admin, &1);
+    c.client.upgrade(&new_admin, &wasm_hash);
+}
+
+#[test]
 fn set_admin_fails_without_new_admin_signature() {
     let c = Ctx::new();
     let new_admin = Address::generate(&c.env);
@@ -142,6 +238,18 @@ fn set_token_validates() {
     StellarAssetClient::new(&c.env, &t).mint(&c.maintainer, &UNIT);
     c.client.set_token(&c.admin, &t, &1, &UNIT);
     assert_eq!(c.client.get_token(&t).unwrap().max_amount, UNIT);
+}
+
+#[test]
+fn token_changes_emit_dedicated_events() {
+    let c = Ctx::new();
+    let token = c
+        .env
+        .register_stellar_asset_contract_v2(Address::generate(&c.env))
+        .address();
+    c.client.set_token(&c.admin, &token, &1, &UNIT);
+    c.client.remove_token(&c.admin, &token);
+    assert!(c.env.events().all().events().len() >= 2);
 }
 
 #[test]

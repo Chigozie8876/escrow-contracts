@@ -5,6 +5,23 @@ members = ["contracts/*"]
 [workspace.dependencies]
 soroban-sdk = "=29.0.1"
 
+# Stricter lints for code that moves money. CI runs clippy with -D warnings, so every hit fails the build.
+# Each `allow` in the source must say why (allow_attributes_without_reason).
+[workspace.lints.clippy]
+# Unchecked integer arithmetic can wrap or panic; use checked_* and return Error::Overflow.
+arithmetic_side_effects = "warn"
+# Casts that can silently lose or reinterpret bits; use From/TryFrom.
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"
+cast_sign_loss = "warn"
+cast_lossless = "warn"
+# A panic aborts the transaction with no typed error for the caller.
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+indexing_slicing = "warn"
+allow_attributes_without_reason = "warn"
+
 [profile.release]
 opt-level = "z"
 overflow-checks = true

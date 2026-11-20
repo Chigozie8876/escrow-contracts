@@ -18,7 +18,10 @@ fn split(c: &Ctx, shares: &[(Address, u32)]) -> SVec<WinnerShare> {
 fn maintainer_releases_with_correct_fee() {
     let c = Ctx::new();
     let id = c.fund(1);
-    c.client.release(&c.maintainer, &id, &c.winner);
+    let settlement = c.client.release(&c.maintainer, &id, &c.winner);
+    assert_eq!(settlement.net, 97 * UNIT);
+    assert_eq!(settlement.fee, 3 * UNIT);
+    assert!(!settlement.deferred);
     assert_eq!(c.bal(&c.token, &c.winner), 97 * UNIT);
     assert_eq!(c.bal(&c.token, &c.treasury), 3 * UNIT);
     assert_eq!(c.contract_bal(&c.token), 0);

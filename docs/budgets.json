@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "note": "Budget ceilings for the local test host. Refresh deliberately with UPDATE_BUDGETS=1 cargo test --package bounty_escrow budgets -- --nocapture after an intentional change.",
+  "tolerance_percent": 10,
+  "entries": [
+    {"name": "init", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "fund_bounty", "cpu_instructions": 8000000, "memory_bytes": 8000000, "read_entries": 80, "write_entries": 80, "read_bytes": 80000, "write_bytes": 40000},
+    {"name": "release_with_fee", "cpu_instructions": 10000000, "memory_bytes": 10000000, "read_entries": 100, "write_entries": 100, "read_bytes": 100000, "write_bytes": 50000},
+    {"name": "release_without_fee", "cpu_instructions": 9000000, "memory_bytes": 9000000, "read_entries": 90, "write_entries": 90, "read_bytes": 90000, "write_bytes": 45000},
+    {"name": "refund", "cpu_instructions": 8000000, "memory_bytes": 8000000, "read_entries": 80, "write_entries": 80, "read_bytes": 80000, "write_bytes": 40000},
+    {"name": "open_dispute", "cpu_instructions": 5000000, "memory_bytes": 5000000, "read_entries": 50, "write_entries": 50, "read_bytes": 50000, "write_bytes": 25000},
+    {"name": "resolve_split", "cpu_instructions": 15000000, "memory_bytes": 15000000, "read_entries": 150, "write_entries": 150, "read_bytes": 150000, "write_bytes": 75000},
+    {"name": "resolve_zero", "cpu_instructions": 12000000, "memory_bytes": 12000000, "read_entries": 120, "write_entries": 120, "read_bytes": 120000, "write_bytes": 60000},
+    {"name": "resolve_with_evidence", "cpu_instructions": 15000000, "memory_bytes": 15000000, "read_entries": 150, "write_entries": 150, "read_bytes": 150000, "write_bytes": 75000},
+    {"name": "top_up", "cpu_instructions": 8000000, "memory_bytes": 8000000, "read_entries": 80, "write_entries": 80, "read_bytes": 80000, "write_bytes": 40000},
+    {"name": "extend_deadline", "cpu_instructions": 5000000, "memory_bytes": 5000000, "read_entries": 50, "write_entries": 50, "read_bytes": 50000, "write_bytes": 25000},
+    {"name": "expire_dispute", "cpu_instructions": 5000000, "memory_bytes": 5000000, "read_entries": 50, "write_entries": 50, "read_bytes": 50000, "write_bytes": 25000},
+    {"name": "set_token", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "remove_token", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "set_fee", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "set_relayer", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "set_arbiter", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "set_treasury", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "set_grace", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "set_durations", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "set_admin", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "pause", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "unpause", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "set_dispute_timeout", "cpu_instructions": 3000000, "memory_bytes": 3000000, "read_entries": 40, "write_entries": 40, "read_bytes": 40000, "write_bytes": 20000},
+    {"name": "upgrade", "cpu_instructions": 6000000, "memory_bytes": 6000000, "read_entries": 60, "write_entries": 60, "read_bytes": 60000, "write_bytes": 30000}
+  ]
+}

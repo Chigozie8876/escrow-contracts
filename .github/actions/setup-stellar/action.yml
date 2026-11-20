@@ -1,0 +1,13 @@
+name: setup-stellar
+description: Installs the prebuilt stellar-cli 28.1.0 after verifying its checksum.
+runs:
+  using: composite
+  steps:
+    - name: stellar-cli 28.1.0 (prebuilt, checksum verified)
+      shell: bash
+      run: |
+        curl -sSfL -o stellar.tgz https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz
+        echo "c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462  stellar.tgz" | sha256sum -c -
+        mkdir -p "$HOME/.local/bin" && tar xzf stellar.tgz -C "$HOME/.local/bin" stellar
+        rm stellar.tgz
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"

@@ -1,27 +1,169 @@
 name: ci
-on: [push, pull_request]
+
+# Pushes run only on the long-lived branches; every other branch is covered by its pull request.
+# This stops a PR branch from running the whole pipeline twice (once for the push, once for the PR).
+on:
+  push:
+    branches: [fresh-build, main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same PR (or branch) cancels the run it supersedes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: rustup show
-      - name: stellar-cli 28.1.0 (prebuilt, checksum verified)
-        run: |
-          curl -sSfL -o stellar.tgz https://github.com/stellar/stellar-cli/releases/download/v28.1.0/stellar-cli-28.1.0-x86_64-unknown-linux-gnu.tar.gz
-          echo "c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462  stellar.tgz" | sha256sum -c -
-          mkdir -p "$HOME/.local/bin" && tar xzf stellar.tgz -C "$HOME/.local/bin" stellar
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-test-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: cargo-test-${{ runner.os }}-
+      - uses: ./.github/actions/setup-stellar
       # the upgrade test embeds the built wasm, so build before fmt/clippy/test
       - run: ./scripts/build.sh
+      - name: check wasm size
+        run: bash scripts/check-wasm-size.sh
       - run: bash scripts/reproducible-build.sh
       - run: python3 scripts/check_contract_docs.py
       - run: bash scripts/tests/deploy-mainnet.test.sh
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      # The stricter lint set lives in [workspace.lints] in Cargo.toml; -D warnings makes every hit fail CI.
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup component add llvm-tools-preview
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-llvm-cov
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-coverage-${{ runner.os }}-llvm-cov-0.9.1-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: cargo-coverage-${{ runner.os }}-llvm-cov-0.9.1-
+      - name: install cargo-llvm-cov
+        run: command -v cargo-llvm-cov || cargo install --locked cargo-llvm-cov --version 0.9.1
+      - uses: ./.github/actions/setup-stellar
+      # the upgrade test embeds the built wasm
+      - run: ./scripts/build.sh
+      - name: run tests with coverage
+        # The test modules themselves are excluded so the numbers describe the contract code only.
+        env:
+          IGNORE: src/test/
+        run: |
+          cargo llvm-cov --locked --package bounty_escrow --ignore-filename-regex "$IGNORE" --lcov --output-path lcov.info
+          cargo llvm-cov report --package bounty_escrow --ignore-filename-regex "$IGNORE" --html --output-dir coverage-html
+          cargo llvm-cov report --package bounty_escrow --ignore-filename-regex "$IGNORE" --summary-only | tee coverage-summary.txt
+          {
+            echo '### Coverage (bounty_escrow)'
+            echo '```'
+            cat coverage-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: |
+            lcov.info
+            coverage-summary.txt
+            coverage-html/
+          if-no-files-found: error
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # shellcheck ships preinstalled on the ubuntu runners.
+      - run: shellcheck --version
+      - run: shellcheck scripts/*.sh scripts/tests/*.sh
+
   audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - run: cargo install --locked cargo-audit && cargo audit
+      # Cache the cargo-audit binary only. The advisory database is fetched fresh on every run.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-0.23.0-${{ hashFiles('rust-toolchain.toml') }}
+      - name: install cargo-audit
+        run: command -v cargo-audit || cargo install --locked cargo-audit --version 0.23.0
+      - run: cargo audit
+
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      # deny.toml is the policy; the action installs cargo-deny and fetches the advisory DB.
+      - uses: EmbarkStudios/cargo-deny-action@2b70cf22ed5701843749a917048c3aaaf420a7d9 # v2.1.3
+        with:
+          command: check
+
+  smoke-local:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: rustup show
+      - uses: ./.github/actions/setup-stellar
+      - name: start local Stellar network
+        run: stellar container start local --limits unlimited
+      - name: wait for local RPC
+        run: |
+          for _ in $(seq 1 60); do
+            if stellar network health --network local >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "local Stellar RPC did not become healthy" >&2
+          exit 1
+      - name: create and fund local identities
+        run: |
+          for role in admin arbiter treasury relayer maintainer contributor; do
+            stellar keys generate "se-local-$role"
+          done
+          for role in admin arbiter treasury relayer maintainer contributor; do
+            for attempt in $(seq 1 10); do
+              if stellar keys fund "se-local-$role" --network local; then
+                break
+              fi
+              if [ "$attempt" -eq 10 ]; then
+                echo "could not fund se-local-$role" >&2
+                exit 1
+              fi
+              sleep 3
+            done
+          done
+      - name: deploy and run the smoke test
+        env:
+          NETWORK: local
+          KEY_PREFIX: se-local-
+          DEPLOYMENT_FILE: deployments/local.json
+        run: |
+          ./scripts/deploy-testnet.sh
+          ./scripts/smoke-testnet.sh
+      - name: stop local Stellar network
+        if: always()
+        run: stellar container stop local

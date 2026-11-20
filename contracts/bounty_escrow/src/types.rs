@@ -112,6 +112,29 @@ pub struct ClaimRecord {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReleaseSettlement {
+    pub net: i128,
+    pub fee: i128,
+    pub deferred: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefundSettlement {
+    pub amount: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolveSettlement {
+    pub winner_net: i128,
+    pub fee: i128,
+    pub maintainer_amount: i128,
+    pub winner_deferred: bool,
+}
+
+#[contracttype]
 pub enum DataKey {
     Config,
     NextId,

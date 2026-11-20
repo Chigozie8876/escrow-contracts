@@ -1,0 +1,61 @@
+# Supply-chain policy for cargo-deny. CI runs `cargo deny check`; see
+# .cargo/audit.toml for the one advisory that is deliberately ignored.
+#
+# Keep exceptions narrow and justified. A crate that is allowed everywhere
+# belongs in `[licenses] allow`; a crate that needs a different licence belongs
+# in `[licenses] exceptions` with a reason in the comment above it.
+
+[advisories]
+# Same exception as .cargo/audit.toml: crypto-bigint 0.5.5 is reached only
+# through soroban-env-host's test host, is not in the deployed Wasm, and cannot
+# be bumped until upstream moves. Re-check on every soroban-sdk upgrade.
+ignore = [
+  { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5.5 is test-host-only; not in the deployed Wasm and blocked on an upstream bump" },
+]
+unmaintained = "workspace"
+unsound = "workspace"
+
+[bans]
+# Duplicate versions are reported but do not fail the build: Soroban's own
+# dependency graph currently carries several major-version pairs.
+multiple-versions = "warn"
+wildcards = "deny"
+# Native TLS and git libraries are not needed by this workspace. Keeping them
+# out keeps the build reproducible and the licence surface small.
+deny = [
+  { crate = "openssl", reason = "not needed; avoid native TLS in the contract build", use-instead = "rustls" },
+  { crate = "openssl-sys", reason = "not needed; avoid native TLS in the contract build", use-instead = "rustls" },
+  { crate = "git2", reason = "the build must not depend on a system git library", use-instead = "the git CLI" },
+  { crate = "libssh2-sys", reason = "not needed by the contract workspace" },
+]
+
+[licenses]
+confidence-threshold = 0.93
+# bounty_escrow is publish = false; its licence expression is not part of the
+# distributed artefact. Third-party crates are still checked.
+private = { ignore = true }
+include-dev = true
+allow = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MIT-0",
+  "MPL-2.0",
+  "OpenSSL",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "Unlicense",
+  "Zlib",
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -1,5 +1,6 @@
 target/
 test_snapshots/
+deployments/local.json
 .env*
 *.secret
 .DS_Store

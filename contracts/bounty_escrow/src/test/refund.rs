@@ -19,7 +19,8 @@ fn works_at_exactly_deadline_plus_grace_without_fee() {
     let before = c.bal(&c.token, &c.maintainer);
     let id = c.fund(1);
     c.set_time(c.now() + 7 * DAY + GRACE);
-    c.client.refund(&c.maintainer, &id);
+    let settlement = c.client.refund(&c.maintainer, &id);
+    assert_eq!(settlement.amount, 100 * UNIT);
     assert_eq!(c.bal(&c.token, &c.maintainer), before);
     assert_eq!(c.bal(&c.token, &c.treasury), 0);
     assert_eq!(c.client.get_bounty(&id).status, Status::Refunded);
