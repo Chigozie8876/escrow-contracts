@@ -170,7 +170,7 @@ fn measure_expire_dispute() -> Measurement {
 fn measure_set_token() -> Measurement {
     let c = Ctx::new();
     c.client
-        .set_token(&c.admin, &c.token2, &UNIT, &(500 * UNIT));
+        .set_token(&c.admin, &c.token2, &UNIT, &(500 * UNIT), &None);
     record("set_token", &c)
 }
 
