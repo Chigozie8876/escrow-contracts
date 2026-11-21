@@ -3,6 +3,8 @@ use soroban_sdk::{Address, Env, Vec};
 use crate::errors::Error;
 use crate::types::{
     Bounty, ClaimRecord, Config, DataKey, DisputeRecord, Status, TokenLimits, Totals,
+    Bounty, ClaimRecord, Config, DataKey, DisputeRecord, PolicyConfig, RolesConfig, TokenLimits,
+    Totals,
 };
 
 // Ledgers close about every 5 s: 17_280 per day. Testnet max entry TTL is
@@ -22,20 +24,165 @@ pub fn bump_instance(env: &Env) {
 }
 
 pub fn has_config(env: &Env) -> bool {
-    env.storage().instance().has(&DataKey::Config)
+    env.storage().instance().has(&DataKey::Roles) || env.storage().instance().has(&DataKey::Config)
+}
+
+pub fn get_roles(env: &Env) -> Result<RolesConfig, Error> {
+    bump_instance(env);
+    if let Some(r) = env.storage().instance().get(&DataKey::Roles) {
+        return Ok(r);
+    }
+    let c: Config = env
+        .storage()
+        .instance()
+        .get(&DataKey::Config)
+        .ok_or(Error::NotInitialized)?;
+    Ok(RolesConfig {
+        admin: c.admin,
+        relayer: c.relayer,
+        arbiter: c.arbiter,
+        treasury: c.treasury,
+    })
+}
+
+pub fn set_roles(env: &Env, r: &RolesConfig) {
+    env.storage().instance().set(&DataKey::Roles, r);
+    bump_instance(env);
+}
+
+pub fn get_policy(env: &Env) -> Result<PolicyConfig, Error> {
+    bump_instance(env);
+    if let Some(p) = env.storage().instance().get(&DataKey::Policy) {
+        return Ok(p);
+    }
+    let c: Config = env
+        .storage()
+        .instance()
+        .get(&DataKey::Config)
+        .ok_or(Error::NotInitialized)?;
+    Ok(PolicyConfig {
+        fee_bps: c.fee_bps,
+        grace_secs: c.grace_secs,
+        min_duration_secs: c.min_duration_secs,
+        max_duration_secs: c.max_duration_secs,
+    })
+}
+
+pub fn set_policy(env: &Env, p: &PolicyConfig) {
+    env.storage().instance().set(&DataKey::Policy, p);
+    bump_instance(env);
+}
+
+pub fn is_paused(env: &Env) -> bool {
+    env.storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+}
+
+pub fn set_paused(env: &Env, paused: bool) {
+    env.storage().instance().set(&DataKey::Paused, &paused);
+    bump_instance(env);
+}
+
+pub fn get_admin(env: &Env) -> Result<Address, Error> {
+    Ok(get_roles(env)?.admin)
+}
+
+pub fn get_relayer(env: &Env) -> Result<Address, Error> {
+    Ok(get_roles(env)?.relayer)
+}
+
+pub fn get_arbiter(env: &Env) -> Result<Address, Error> {
+    Ok(get_roles(env)?.arbiter)
 }
 
 pub fn get_config(env: &Env) -> Result<Config, Error> {
     bump_instance(env);
-    env.storage()
+    get_config_view(env)
+}
+
+/// #181: Read-only config without bumping instance TTL.
+/// Used by view functions (`get_config`, `get_totals`) so reads do not
+/// extend the contract's storage lifetime — only state-changing calls should.
+pub fn get_config_view(env: &Env) -> Result<Config, Error> {
+    let roles = get_roles_no_bump(env)?;
+    let policy = get_policy_no_bump(env)?;
+    let paused = is_paused(env);
+    Ok(Config {
+        admin: roles.admin,
+        relayer: roles.relayer,
+        arbiter: roles.arbiter,
+        treasury: roles.treasury,
+        fee_bps: policy.fee_bps,
+        grace_secs: policy.grace_secs,
+        min_duration_secs: policy.min_duration_secs,
+        max_duration_secs: policy.max_duration_secs,
+        paused,
+    })
+}
+
+/// #181: Read roles without bumping TTL.
+fn get_roles_no_bump(env: &Env) -> Result<RolesConfig, Error> {
+    if let Some(r) = env.storage().instance().get(&DataKey::Roles) {
+        return Ok(r);
+    }
+    let c: Config = env
+        .storage()
         .instance()
         .get(&DataKey::Config)
-        .ok_or(Error::NotInitialized)
+        .ok_or(Error::NotInitialized)?;
+    Ok(RolesConfig {
+        admin: c.admin,
+        relayer: c.relayer,
+        arbiter: c.arbiter,
+        treasury: c.treasury,
+    })
+}
+
+/// #181: Read policy without bumping TTL.
+fn get_policy_no_bump(env: &Env) -> Result<PolicyConfig, Error> {
+    if let Some(p) = env.storage().instance().get(&DataKey::Policy) {
+        return Ok(p);
+    }
+    let c: Config = env
+        .storage()
+        .instance()
+        .get(&DataKey::Config)
+        .ok_or(Error::NotInitialized)?;
+    Ok(PolicyConfig {
+        fee_bps: c.fee_bps,
+        grace_secs: c.grace_secs,
+        min_duration_secs: c.min_duration_secs,
+        max_duration_secs: c.max_duration_secs,
+    })
 }
 
 pub fn set_config(env: &Env, c: &Config) {
-    env.storage().instance().set(&DataKey::Config, c);
+    let roles = RolesConfig {
+        admin: c.admin.clone(),
+        relayer: c.relayer.clone(),
+        arbiter: c.arbiter.clone(),
+        treasury: c.treasury.clone(),
+    };
+    let policy = PolicyConfig {
+        fee_bps: c.fee_bps,
+        grace_secs: c.grace_secs,
+        min_duration_secs: c.min_duration_secs,
+        max_duration_secs: c.max_duration_secs,
+    };
+    env.storage().instance().set(&DataKey::Roles, &roles);
+    env.storage().instance().set(&DataKey::Policy, &policy);
+    env.storage().instance().set(&DataKey::Paused, &c.paused);
     bump_instance(env);
+}
+
+pub fn bounty_count(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::NextId)
+        .unwrap_or(1u64)
+        .saturating_sub(1)
 }
 
 pub fn next_id(env: &Env) -> Result<u64, Error> {
@@ -135,10 +282,7 @@ pub fn clear_active(env: &Env, repo_id: u64, issue: u64) {
 
 pub fn get_totals(env: &Env, token: &Address) -> Totals {
     let key = DataKey::Totals(token.clone());
-    match env.storage().persistent().get(&key) {
-        Some(t) => t,
-        None => Totals::default(),
-    }
+    env.storage().persistent().get(&key).unwrap_or_default()
 }
 
 pub fn set_totals(env: &Env, token: &Address, t: &Totals) {

@@ -108,6 +108,6 @@ impl<'a> Ctx<'a> {
     pub fn assert_invariant(&self, token: &Address) {
         let t = self.client.get_totals(token);
         assert_eq!(t.funded, t.released_net + t.fees + t.refunded + t.held);
-        assert_eq!(t.held, self.contract_bal(token));
+        assert_eq!(t.held + t.accrued_fees, self.contract_bal(token));
     }
 }

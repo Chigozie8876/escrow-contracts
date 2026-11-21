@@ -112,6 +112,14 @@ pub struct Claimed {
     pub net: i128,
 }
 
+#[contractevent(topics = ["bounty", "fees_withdrawn"])]
+pub struct FeesWithdrawn {
+    #[topic]
+    pub token: Address,
+    pub treasury: Address,
+    pub amount: i128,
+}
+
 /// The arbiter recorded the evidence behind a resolution. Emitted only by
 /// `resolve_with_evidence`, right after `resolved`.
 #[contractevent(topics = ["bounty", "evidence"])]
@@ -121,4 +129,13 @@ pub struct EvidenceRecorded {
     pub arbiter: Address,
     /// SHA-256 digest of the evidence bundle; see docs/CONTRACT.md.
     pub evidence_hash: BytesN<32>,
+}
+
+/// #178: Emitted when a bounty's maintainer key is rotated.
+#[contractevent(topics = ["bounty", "maintainer_transferred"])]
+pub struct MaintainerTransferred {
+    #[topic]
+    pub id: u64,
+    pub from: Address,
+    pub to: Address,
 }

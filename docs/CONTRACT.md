@@ -17,13 +17,16 @@ Soroban escrow for GitHub issue bounties. soroban-sdk 29.0.1, target `wasm32v1-n
 | `extend_deadline(maintainer, id, new_deadline)` | maintainer | Open only; `new_deadline > deadline` and `<= now + max_duration` (`InvalidDeadline`). Emits `deadline_extended`. |
 | `top_up(maintainer, id, extra)` | maintainer | Open only; `Paused`, `TokenNotAllowed` if the token was removed, `AmountTooSmall` if `extra <= 0`, `AmountTooLarge` if the new total exceeds the token's `max_amount`, `TopUpLimitReached` after 10 top-ups. The fee snapshot is unchanged. Emits `topped_up`. |
 | `claim(winner, id)` | the recorded winner | A deferred payout must exist (`NothingToClaim`), be unclaimed (`AlreadyClaimed`), and belong to the caller (`Unauthorized`). Pays the net. Emits `claimed`. |
-| `resolve(arbiter, id, winner: Option, winner_bps)` | arbiter | Disputed only. `portion = floor(amount*bps/10000)`, fee taken from portion, remainder to maintainer. `InvalidSplit`, `SelfPayout`, `ConflictOfInterest` (winner is the arbiter or the treasury). Works while paused. A winner transfer that fails is deferred to `claim` instead of reverting. |
+| `withdraw_fees(caller, token)` | treasury or admin | Open/Released/Resolved; transfers accrued fees for `token` to the treasury and resets `accrued_fees` to 0 (`AmountTooSmall` if none). Emits `fees_withdrawn`. |
+| `resolve(arbiter, id, winner: Option, winner_bps)` | arbiter | Disputed only. `portion = floor(amount*bps/10000)`, fee taken from portion and accrued, remainder to maintainer. `InvalidSplit`, `SelfPayout`, `ConflictOfInterest` (winner is the arbiter or the treasury). Works while paused. A winner transfer that fails is deferred to `claim` instead of reverting. |
 | `resolve_with_evidence(arbiter, id, winner, winner_bps, evidence_hash)` | arbiter | Same rules and errors as `resolve`. Also emits `evidence` with the 32-byte `evidence_hash`. See "Resolution evidence". |
 | `bump(bounty_ids)` | anyone | Permissionless keeper entry point. Extends TTL of active (`Open`/`Disputed`) bounties, issue locks, and token totals to 120 days. Capped by `MAX_BUMP_LIMIT` (50). Side-effect free apart from TTL. |
 | `get_bounty`, `get_bounties`, `active_bounty`, `get_config`, `get_totals`, `get_token`, `get_dispute_timeout` | none | read only. `get_bounties(start, limit)` returns up to `limit` bounties (capped at 50) skipping missing ids. |
 | `quote_release(bounty_id)`, `quote_resolve(bounty_id, winner_bps)`, `quote_fee(amount, fee_bps)` | none | read only simulation views for fee math previews. |
 | `set_token(admin, token, min, max, fee_bps)` | admin | emit `config` and `token_set` event. `fee_bps` is an optional override capped by `MAX_FEE_BPS`. |
 | `remove_token/set_fee/set_relayer/set_arbiter/set_treasury/set_grace/set_durations/set_dispute_timeout` | admin | emit `config` event |
+| `get_bounty`, `active_bounty`, `bounty_count`, `get_config`, `get_totals`, `get_token`, `get_dispute_timeout` | none | read only; `bounty_count` returns total bounties created without bumping TTL |
+| `set_token/remove_token/set_fee/set_relayer/set_arbiter/set_treasury/set_grace/set_durations/set_dispute_timeout` | admin | emit `config` event; writes only affected slice of config |
 | `set_admin(admin, new_admin)` | admin and new_admin | two-party auth |
 | `pause/unpause` | admin | blocks `fund_bounty` only |
 | `upgrade(admin, wasm_hash)` | admin | emits `upgraded` |
@@ -32,13 +35,13 @@ Soroban escrow for GitHub issue bounties. soroban-sdk 29.0.1, target `wasm32v1-n
 AlreadyInitialized=1 NotInitialized=2 Unauthorized=3 Paused=4 TokenNotAllowed=5 AmountTooSmall=6 AmountTooLarge=7 InvalidDeadline=8 IssueAlreadyFunded=9 BountyNotFound=10 InvalidStatus=11 DeadlineNotReached=12 SelfPayout=13 InvalidSplit=14 InvalidFee=15 Overflow=16 RelayerNotAllowed=17 TopUpLimitReached=18 DisputeNotExpired=19 DisputeAlreadyUsed=20 NothingToClaim=21 AlreadyClaimed=22 ConflictOfInterest=23 UnexpectedTransferAmount=24. Never renumber.
 
 ## Events
-Topics `("bounty", <name>, id)`: `funded`, `released` (`deferred`), `refunded`, `disputed`, `resolved` (`winner_deferred`), `evidence` (`evidence_hash`), `deadline_extended`, `topped_up`, `dispute_expired`, `claimed`, `config`, `paused`, `unpaused`, `upgraded`. Data carries every field the indexer needs.
+Topics `("bounty", <name>, id)`: `funded`, `released` (`deferred`), `refunded`, `disputed`, `resolved` (`winner_deferred`), `evidence` (`evidence_hash`), `deadline_extended`, `topped_up`, `dispute_expired`, `claimed`, `fees_withdrawn`, `config`, `paused`, `unpaused`, `upgraded`. Data carries every field the indexer needs.
 
 ## Fee math
-`fee = floor(amount*bps/10000)` (dust goes to the receiver); `portion = floor(amount*winner_bps/10000)` (dust stays with the maintainer). Checked arithmetic, `Overflow` on failure.
+`fee = floor(amount*bps/10000)` (dust goes to the receiver); `portion = floor(amount*winner_bps/10000)` (dust stays with the maintainer). Checked arithmetic, `Overflow` on failure. Fees accrue per token in `Totals.accrued_fees` and remain in contract balance until withdrawn via `withdraw_fees`.
 
 ## Accounting invariant
-Per token: `funded == released_net + fees + refunded + held`, and `held + claimable == token.balance(contract)`, where `claimable` is the sum of unclaimed deferred payouts (`DataKey::ClaimableTotal`).
+Per token: `funded == released_net + fees + refunded + held`, and `held + claimable + accrued_fees == token.balance(contract)`, where `claimable` is the sum of unclaimed deferred payouts (`DataKey::ClaimableTotal`), and `accrued_fees` is protocol fees awaiting withdrawal (`Totals.accrued_fees`).
 
 A deferred payout moves its net from `held` to `claimable` and does not touch `released_net`. `claim` moves it from `claimable` to `released_net`. `top_up` raises `funded` and `held` together. The property test has not been updated for `claimable` or the new operations yet; it still checks `held == balance` and will fail on any sequence that defers a payout.
 

@@ -367,3 +367,47 @@ fn upgrade_requires_admin_signature() {
     c.env.set_auths(&[]);
     assert!(c.client.try_upgrade(&c.admin, &hash).is_err());
 }
+
+#[test]
+fn withdraw_fees_auth_and_sweep() {
+    let c = Ctx::new();
+    let id = c.fund(1);
+    c.client.release(&c.maintainer, &id, &c.winner);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 3 * UNIT);
+
+    // Random address cannot withdraw fees
+    let stranger = Address::generate(&c.env);
+    assert_eq!(
+        c.client
+            .try_withdraw_fees(&stranger, &c.token)
+            .unwrap_err()
+            .unwrap(),
+        Error::Unauthorized
+    );
+
+    // Admin can withdraw
+    let withdrawn = c.client.withdraw_fees(&c.admin, &c.token);
+    assert_eq!(withdrawn, 3 * UNIT);
+    assert_eq!(c.bal(&c.token, &c.treasury), 3 * UNIT);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 0);
+
+    // Further withdrawal fails because accrued_fees is 0
+    assert_eq!(
+        c.client
+            .try_withdraw_fees(&c.treasury, &c.token)
+            .unwrap_err()
+            .unwrap(),
+        Error::AmountTooSmall
+    );
+
+    // Fund and release another to test treasury withdrawal
+    let id2 = c.fund(2);
+    c.client.release(&c.maintainer, &id2, &c.winner);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 3 * UNIT);
+
+    // Treasury can withdraw
+    let withdrawn2 = c.client.withdraw_fees(&c.treasury, &c.token);
+    assert_eq!(withdrawn2, 3 * UNIT);
+    assert_eq!(c.bal(&c.token, &c.treasury), 6 * UNIT);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 0);
+}

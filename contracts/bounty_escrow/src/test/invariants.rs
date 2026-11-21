@@ -31,6 +31,10 @@ enum Op {
     Wait {
         days: u64,
     },
+    WithdrawFees {
+        tok: bool,
+        by_admin: bool,
+    },
 }
 
 fn op() -> impl Strategy<Value = Op> {
@@ -48,6 +52,8 @@ fn op() -> impl Strategy<Value = Op> {
         (0usize..8).prop_map(|pick| Op::Dispute { pick }),
         (0usize..8, 0u32..=10_000).prop_map(|(pick, bps)| Op::Resolve { pick, bps }),
         (0u64..40).prop_map(|days| Op::Wait { days }),
+        (any::<bool>(), any::<bool>())
+            .prop_map(|(tok, by_admin)| Op::WithdrawFees { tok, by_admin }),
     ]
 }
 
@@ -91,6 +97,11 @@ proptest! {
                     let _ = c.client.try_resolve(&c.arbiter, &ids[pick % ids.len()], &w, &bps);
                 }
                 Op::Wait { days } => c.set_time(c.now() + days * DAY),
+                Op::WithdrawFees { tok, by_admin } => {
+                    let t = if tok { &c.token } else { &c.token2 };
+                    let who = if by_admin { &c.admin } else { &c.treasury };
+                    let _ = c.client.try_withdraw_fees(who, t);
+                }
                 _ => {}
             }
             c.assert_invariant(&c.token);

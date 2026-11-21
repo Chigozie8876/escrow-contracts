@@ -62,6 +62,9 @@ fn resolve_full_to_winner() {
     c.client
         .resolve(&c.arbiter, &id, &Some(c.winner.clone()), &10_000);
     assert_eq!(c.bal(&c.token, &c.winner), 97 * UNIT);
+    assert_eq!(c.bal(&c.token, &c.treasury), 0);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 3 * UNIT);
+    c.client.withdraw_fees(&c.treasury, &c.token);
     assert_eq!(c.bal(&c.token, &c.treasury), 3 * UNIT);
     assert_eq!(c.bal(&c.token, &c.maintainer), m0);
     assert_eq!(c.client.get_bounty(&id).status, Status::Resolved);
@@ -78,6 +81,9 @@ fn resolve_split_70_30() {
         .resolve(&c.arbiter, &id, &Some(c.winner.clone()), &7_000);
     // portion 70, fee 3% of 70 = 2.1, winner 67.9, maintainer 30
     assert_eq!(c.bal(&c.token, &c.winner), 679 * UNIT / 10);
+    assert_eq!(c.bal(&c.token, &c.treasury), 0);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 21 * UNIT / 10);
+    c.client.withdraw_fees(&c.treasury, &c.token);
     assert_eq!(c.bal(&c.token, &c.treasury), 21 * UNIT / 10);
     assert_eq!(c.bal(&c.token, &c.maintainer), m0 + 30 * UNIT);
     c.assert_invariant(&c.token);
