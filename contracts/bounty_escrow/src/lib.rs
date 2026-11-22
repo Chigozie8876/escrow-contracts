@@ -181,6 +181,9 @@ impl BountyEscrow {
                 issue,
                 token: token.clone(),
                 amount,
+                fee_bps,
+                fee_bps: policy.fee_bps,
+                grace_secs: policy.grace_secs,
                 fee_bps: cfg.fee_bps,
                 deadline,
                 relayer_allowed,
@@ -383,6 +386,8 @@ impl BountyEscrow {
         if b.status != Status::Open {
             return Err(Error::InvalidStatus);
         }
+        // #163: use the grace snapshotted at funding time, not the live config value.
+        let opens = b.deadline.checked_add(b.grace_secs).ok_or(Error::Overflow)?;
         let opens = b
             .deadline
             .checked_add(cfg.grace_secs)
@@ -408,6 +413,14 @@ impl BountyEscrow {
             amount: b.amount,
         }
         .publish(&env);
+        Ok(RefundSettlement { amount: b.amount })
+    }
+
+    /// Return the exact ledger timestamp at which `refund` becomes valid.
+    pub fn refundable_at(env: Env, bounty_id: u64) -> Result<u64, Error> {
+        let bounty = storage::get_bounty(&env, bounty_id)?;
+        // #163: use the grace snapshotted at funding time.
+        bounty.deadline.checked_add(bounty.grace_secs).ok_or(Error::Overflow)
         Ok(())
     }
 

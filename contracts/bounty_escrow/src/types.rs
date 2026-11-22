@@ -20,6 +20,9 @@ pub struct Bounty {
     pub token: Address,
     pub amount: i128,
     pub fee_bps: u32,
+    /// #163: grace_secs in force at funding time, snapshotted so a later
+    /// `set_grace` call cannot extend the refund window on existing bounties.
+    pub grace_secs: u64,
     pub deadline: u64,
     pub relayer_allowed: bool,
     pub status: Status,
