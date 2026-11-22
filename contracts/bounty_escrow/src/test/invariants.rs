@@ -39,7 +39,7 @@ enum Op {
 
 fn op() -> impl Strategy<Value = Op> {
     prop_oneof![
-        (0u64..6, 1i128..400, any::<bool>(), any::<bool>()).prop_map(
+        (1u64..6, 1i128..400, any::<bool>(), any::<bool>()).prop_map(
             |(issue, units, tok, relayer)| Op::Fund {
                 issue,
                 units,

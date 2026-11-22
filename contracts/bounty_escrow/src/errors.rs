@@ -34,4 +34,7 @@ pub enum Error {
     UpgradeNotReady = 26,
     NoPendingUpgrade = 27,
     UpgradeDelayCannotDecrease = 28,
+    InvalidKey = 29,
+    ContractAddressRejected = 30,
+    InvalidLimits = 31,
 }

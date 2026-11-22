@@ -421,7 +421,6 @@ impl BountyEscrow {
         let bounty = storage::get_bounty(&env, bounty_id)?;
         // #163: use the grace snapshotted at funding time.
         bounty.deadline.checked_add(bounty.grace_secs).ok_or(Error::Overflow)
-        Ok(())
     }
 
     pub fn open_dispute(env: Env, caller: Address, bounty_id: u64) -> Result<(), Error> {
