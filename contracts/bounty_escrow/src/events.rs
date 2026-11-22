@@ -1,4 +1,6 @@
-use soroban_sdk::{contractevent, Address, BytesN, Symbol, Val};
+use soroban_sdk::{contractevent, Address, BytesN, Symbol, Vec};
+
+use crate::types::SplitPayout;
 
 #[contractevent(topics = ["bounty", "funded"])]
 pub struct Funded {
@@ -24,6 +26,15 @@ pub struct Released {
     pub caller: Address,
     /// True when the winner could not be paid now and the net is claimable later.
     pub deferred: bool,
+}
+
+#[contractevent(topics = ["bounty", "released_split"])]
+pub struct ReleasedSplit {
+    #[topic]
+    pub id: u64,
+    pub payouts: Vec<SplitPayout>,
+    pub fee: i128,
+    pub caller: Address,
 }
 
 #[contractevent(topics = ["bounty", "refunded"])]
@@ -55,7 +66,6 @@ pub struct Resolved {
 pub struct ConfigChanged {
     #[topic]
     pub field: Symbol,
-    pub value: Val,
 }
 
 #[contractevent(topics = ["bounty", "token_set"])]
@@ -73,18 +83,24 @@ pub struct TokenRemoved {
 }
 
 #[contractevent(topics = ["bounty", "paused"])]
-pub struct Paused {
-    pub admin: Address,
-}
+pub struct Paused {}
 
 #[contractevent(topics = ["bounty", "unpaused"])]
-pub struct Unpaused {
-    pub admin: Address,
-}
+pub struct Unpaused {}
 
 #[contractevent(topics = ["bounty", "upgraded"])]
 pub struct Upgraded {
-    pub admin: Address,
+    pub wasm_hash: BytesN<32>,
+}
+
+#[contractevent(topics = ["bounty", "upgrade_proposed"])]
+pub struct UpgradeProposed {
+    pub wasm_hash: BytesN<32>,
+    pub eta: u64,
+}
+
+#[contractevent(topics = ["bounty", "upgrade_cancelled"])]
+pub struct UpgradeCancelled {
     pub wasm_hash: BytesN<32>,
 }
 
@@ -118,14 +134,6 @@ pub struct Claimed {
     pub net: i128,
 }
 
-#[contractevent(topics = ["bounty", "fees_withdrawn"])]
-pub struct FeesWithdrawn {
-    #[topic]
-    pub token: Address,
-    pub treasury: Address,
-    pub amount: i128,
-}
-
 /// The arbiter recorded the evidence behind a resolution. Emitted only by
 /// `resolve_with_evidence`, right after `resolved`.
 #[contractevent(topics = ["bounty", "evidence"])]
@@ -135,13 +143,4 @@ pub struct EvidenceRecorded {
     pub arbiter: Address,
     /// SHA-256 digest of the evidence bundle; see docs/CONTRACT.md.
     pub evidence_hash: BytesN<32>,
-}
-
-/// #178: Emitted when a bounty's maintainer key is rotated.
-#[contractevent(topics = ["bounty", "maintainer_transferred"])]
-pub struct MaintainerTransferred {
-    #[topic]
-    pub id: u64,
-    pub from: Address,
-    pub to: Address,
 }
