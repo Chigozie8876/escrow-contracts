@@ -1,10 +1,9 @@
-use soroban_sdk::{Address, Env, Vec};
+use soroban_sdk::{Address, Env};
 
 use crate::errors::Error;
 use crate::types::{
-    Bounty, ClaimRecord, Config, DataKey, DisputeRecord, Status, TokenLimits, Totals,
-    Bounty, ClaimRecord, Config, DataKey, DisputeRecord, PolicyConfig, RolesConfig, TokenLimits,
-    Totals,
+    Bounty, ClaimRecord, Config, DataKey, DisputeRecord, PendingUpgrade, RelayerLimit,
+    RelayerUsage, TokenLimits, Totals,
 };
 
 // Ledgers close about every 5 s: 17_280 per day. Testnet max entry TTL is
@@ -24,165 +23,20 @@ pub fn bump_instance(env: &Env) {
 }
 
 pub fn has_config(env: &Env) -> bool {
-    env.storage().instance().has(&DataKey::Roles) || env.storage().instance().has(&DataKey::Config)
-}
-
-pub fn get_roles(env: &Env) -> Result<RolesConfig, Error> {
-    bump_instance(env);
-    if let Some(r) = env.storage().instance().get(&DataKey::Roles) {
-        return Ok(r);
-    }
-    let c: Config = env
-        .storage()
-        .instance()
-        .get(&DataKey::Config)
-        .ok_or(Error::NotInitialized)?;
-    Ok(RolesConfig {
-        admin: c.admin,
-        relayer: c.relayer,
-        arbiter: c.arbiter,
-        treasury: c.treasury,
-    })
-}
-
-pub fn set_roles(env: &Env, r: &RolesConfig) {
-    env.storage().instance().set(&DataKey::Roles, r);
-    bump_instance(env);
-}
-
-pub fn get_policy(env: &Env) -> Result<PolicyConfig, Error> {
-    bump_instance(env);
-    if let Some(p) = env.storage().instance().get(&DataKey::Policy) {
-        return Ok(p);
-    }
-    let c: Config = env
-        .storage()
-        .instance()
-        .get(&DataKey::Config)
-        .ok_or(Error::NotInitialized)?;
-    Ok(PolicyConfig {
-        fee_bps: c.fee_bps,
-        grace_secs: c.grace_secs,
-        min_duration_secs: c.min_duration_secs,
-        max_duration_secs: c.max_duration_secs,
-    })
-}
-
-pub fn set_policy(env: &Env, p: &PolicyConfig) {
-    env.storage().instance().set(&DataKey::Policy, p);
-    bump_instance(env);
-}
-
-pub fn is_paused(env: &Env) -> bool {
-    env.storage()
-        .instance()
-        .get(&DataKey::Paused)
-        .unwrap_or(false)
-}
-
-pub fn set_paused(env: &Env, paused: bool) {
-    env.storage().instance().set(&DataKey::Paused, &paused);
-    bump_instance(env);
-}
-
-pub fn get_admin(env: &Env) -> Result<Address, Error> {
-    Ok(get_roles(env)?.admin)
-}
-
-pub fn get_relayer(env: &Env) -> Result<Address, Error> {
-    Ok(get_roles(env)?.relayer)
-}
-
-pub fn get_arbiter(env: &Env) -> Result<Address, Error> {
-    Ok(get_roles(env)?.arbiter)
+    env.storage().instance().has(&DataKey::Config)
 }
 
 pub fn get_config(env: &Env) -> Result<Config, Error> {
     bump_instance(env);
-    get_config_view(env)
-}
-
-/// #181: Read-only config without bumping instance TTL.
-/// Used by view functions (`get_config`, `get_totals`) so reads do not
-/// extend the contract's storage lifetime — only state-changing calls should.
-pub fn get_config_view(env: &Env) -> Result<Config, Error> {
-    let roles = get_roles_no_bump(env)?;
-    let policy = get_policy_no_bump(env)?;
-    let paused = is_paused(env);
-    Ok(Config {
-        admin: roles.admin,
-        relayer: roles.relayer,
-        arbiter: roles.arbiter,
-        treasury: roles.treasury,
-        fee_bps: policy.fee_bps,
-        grace_secs: policy.grace_secs,
-        min_duration_secs: policy.min_duration_secs,
-        max_duration_secs: policy.max_duration_secs,
-        paused,
-    })
-}
-
-/// #181: Read roles without bumping TTL.
-fn get_roles_no_bump(env: &Env) -> Result<RolesConfig, Error> {
-    if let Some(r) = env.storage().instance().get(&DataKey::Roles) {
-        return Ok(r);
-    }
-    let c: Config = env
-        .storage()
+    env.storage()
         .instance()
         .get(&DataKey::Config)
-        .ok_or(Error::NotInitialized)?;
-    Ok(RolesConfig {
-        admin: c.admin,
-        relayer: c.relayer,
-        arbiter: c.arbiter,
-        treasury: c.treasury,
-    })
-}
-
-/// #181: Read policy without bumping TTL.
-fn get_policy_no_bump(env: &Env) -> Result<PolicyConfig, Error> {
-    if let Some(p) = env.storage().instance().get(&DataKey::Policy) {
-        return Ok(p);
-    }
-    let c: Config = env
-        .storage()
-        .instance()
-        .get(&DataKey::Config)
-        .ok_or(Error::NotInitialized)?;
-    Ok(PolicyConfig {
-        fee_bps: c.fee_bps,
-        grace_secs: c.grace_secs,
-        min_duration_secs: c.min_duration_secs,
-        max_duration_secs: c.max_duration_secs,
-    })
+        .ok_or(Error::NotInitialized)
 }
 
 pub fn set_config(env: &Env, c: &Config) {
-    let roles = RolesConfig {
-        admin: c.admin.clone(),
-        relayer: c.relayer.clone(),
-        arbiter: c.arbiter.clone(),
-        treasury: c.treasury.clone(),
-    };
-    let policy = PolicyConfig {
-        fee_bps: c.fee_bps,
-        grace_secs: c.grace_secs,
-        min_duration_secs: c.min_duration_secs,
-        max_duration_secs: c.max_duration_secs,
-    };
-    env.storage().instance().set(&DataKey::Roles, &roles);
-    env.storage().instance().set(&DataKey::Policy, &policy);
-    env.storage().instance().set(&DataKey::Paused, &c.paused);
+    env.storage().instance().set(&DataKey::Config, c);
     bump_instance(env);
-}
-
-pub fn bounty_count(env: &Env) -> u64 {
-    env.storage()
-        .instance()
-        .get(&DataKey::NextId)
-        .unwrap_or(1u64)
-        .saturating_sub(1)
 }
 
 pub fn next_id(env: &Env) -> Result<u64, Error> {
@@ -193,22 +47,28 @@ pub fn next_id(env: &Env) -> Result<u64, Error> {
 }
 
 pub fn get_token(env: &Env, token: &Address) -> Option<TokenLimits> {
-    env.storage().instance().get(&DataKey::Token(token.clone()))
+    let key = DataKey::Token(token.clone());
+    if let Some(value) = env.storage().persistent().get(&key) {
+        bump_persistent(env, &key);
+        return Some(value);
+    }
+    env.storage().instance().get(&key)
 }
 
 pub fn set_token(env: &Env, token: &Address, l: &TokenLimits) {
-    env.storage()
-        .instance()
-        .set(&DataKey::Token(token.clone()), l);
+    let key = DataKey::Token(token.clone());
+    env.storage().persistent().set(&key, l);
+    bump_persistent(env, &key);
+    env.storage().instance().remove(&key);
 }
 
 pub fn remove_token(env: &Env, token: &Address) {
-    env.storage()
-        .instance()
-        .remove(&DataKey::Token(token.clone()));
+    let key = DataKey::Token(token.clone());
+    env.storage().persistent().remove(&key);
+    env.storage().instance().remove(&key);
 }
 
-pub fn bump_persistent(env: &Env, key: &DataKey) {
+fn bump_persistent(env: &Env, key: &DataKey) {
     env.storage()
         .persistent()
         .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
@@ -216,41 +76,13 @@ pub fn bump_persistent(env: &Env, key: &DataKey) {
 
 pub fn get_bounty(env: &Env, id: u64) -> Result<Bounty, Error> {
     let key = DataKey::Bounty(id);
-    let b: Bounty = env
+    let b = env
         .storage()
         .persistent()
         .get(&key)
         .ok_or(Error::BountyNotFound)?;
-    if b.status == Status::Open || b.status == Status::Disputed {
-        bump_persistent(env, &key);
-    }
+    bump_persistent(env, &key);
     Ok(b)
-}
-
-pub const MAX_BOUNTIES_LIMIT: u32 = 50;
-
-pub fn get_bounties(env: &Env, start: u64, limit: u32) -> Vec<Bounty> {
-    let capped_limit = limit.min(MAX_BOUNTIES_LIMIT);
-    let mut list = Vec::new(env);
-    if capped_limit == 0 {
-        return list;
-    }
-    let max_id: u64 = env.storage().instance().get(&DataKey::NextId).unwrap_or(1);
-    let mut id = start;
-    while id < max_id && list.len() < capped_limit {
-        let key = DataKey::Bounty(id);
-        if let Some(b) = env.storage().persistent().get::<DataKey, Bounty>(&key) {
-            if b.status == Status::Open || b.status == Status::Disputed {
-                bump_persistent(env, &key);
-            }
-            list.push_back(b);
-        }
-        id = match id.checked_add(1) {
-            Some(next) => next,
-            None => break,
-        };
-    }
-    list
 }
 
 pub fn set_bounty(env: &Env, b: &Bounty) {
@@ -282,7 +114,10 @@ pub fn clear_active(env: &Env, repo_id: u64, issue: u64) {
 
 pub fn get_totals(env: &Env, token: &Address) -> Totals {
     let key = DataKey::Totals(token.clone());
-    env.storage().persistent().get(&key).unwrap_or_default()
+    match env.storage().persistent().get(&key) {
+        Some(t) => t,
+        None => Totals::default(),
+    }
 }
 
 pub fn set_totals(env: &Env, token: &Address, t: &Totals) {
@@ -371,4 +206,61 @@ pub fn set_claimable_total(env: &Env, token: &Address, v: i128) {
     let key = DataKey::ClaimableTotal(token.clone());
     env.storage().persistent().set(&key, &v);
     bump_persistent(env, &key);
+}
+
+pub fn get_relayer_limit(env: &Env, token: &Address) -> Option<RelayerLimit> {
+    let key = DataKey::RelayerLimit(token.clone());
+    let value = env.storage().persistent().get(&key);
+    if value.is_some() {
+        bump_persistent(env, &key);
+    }
+    value
+}
+
+pub fn set_relayer_limit(env: &Env, token: &Address, limit: &RelayerLimit) {
+    let key = DataKey::RelayerLimit(token.clone());
+    env.storage().persistent().set(&key, limit);
+    bump_persistent(env, &key);
+}
+
+pub fn get_relayer_usage(env: &Env, token: &Address) -> RelayerUsage {
+    let key = DataKey::RelayerUsage(token.clone());
+    let value = env.storage().persistent().get(&key);
+    if value.is_some() {
+        bump_persistent(env, &key);
+    }
+    value.unwrap_or_default()
+}
+
+pub fn set_relayer_usage(env: &Env, token: &Address, usage: &RelayerUsage) {
+    let key = DataKey::RelayerUsage(token.clone());
+    env.storage().persistent().set(&key, usage);
+    bump_persistent(env, &key);
+}
+
+pub fn upgrade_delay(env: &Env, fallback: u64) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::UpgradeDelay)
+        .unwrap_or(fallback)
+}
+
+pub fn set_upgrade_delay(env: &Env, delay: u64) {
+    env.storage().instance().set(&DataKey::UpgradeDelay, &delay);
+    bump_instance(env);
+}
+
+pub fn pending_upgrade(env: &Env) -> Option<PendingUpgrade> {
+    env.storage().instance().get(&DataKey::PendingUpgrade)
+}
+
+pub fn set_pending_upgrade(env: &Env, pending: &PendingUpgrade) {
+    env.storage()
+        .instance()
+        .set(&DataKey::PendingUpgrade, pending);
+    bump_instance(env);
+}
+
+pub fn clear_pending_upgrade(env: &Env) {
+    env.storage().instance().remove(&DataKey::PendingUpgrade);
 }
