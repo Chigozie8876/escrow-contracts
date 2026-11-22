@@ -24,7 +24,11 @@ pub struct Bounty {
     pub relayer_allowed: bool,
     pub status: Status,
     pub winner: Option<Address>,
-    pub created_at: u64,
+    // #183: created_at removed — derivable from the Funded event emitted
+    // at creation time. Dropping it shrinks the serialised Bounty by ~16 bytes
+    // (u64 + alignment), reducing rent and CPU on every set_bounty rewrite.
+    // Migration cost: a one-time read of the Funded event for each bounty
+    // if a historical timestamp is ever needed; not stored on-chain.
 }
 
 #[contracttype]
@@ -32,6 +36,7 @@ pub struct Bounty {
 pub struct TokenLimits {
     pub min_amount: i128,
     pub max_amount: i128,
+    pub fee_bps: Option<u32>,
 }
 
 #[contracttype]
@@ -81,6 +86,26 @@ pub struct Config {
     pub min_duration_secs: u64,
     pub max_duration_secs: u64,
     pub paused: bool,
+    /// Issue #175: Optional fast-pause key. Can call pause but never unpause or move funds.
+    pub guardian: Option<Address>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RolesConfig {
+    pub admin: Address,
+    pub relayer: Address,
+    pub arbiter: Address,
+    pub treasury: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PolicyConfig {
+    pub fee_bps: u32,
+    pub grace_secs: u64,
+    pub min_duration_secs: u64,
+    pub max_duration_secs: u64,
 }
 
 /// Per-token accounting: funded == released_net + fees + refunded + held.
@@ -92,6 +117,7 @@ pub struct Totals {
     pub fees: i128,
     pub refunded: i128,
     pub held: i128,
+    pub accrued_fees: i128,
 }
 
 /// Written by `open_dispute`. Its presence means the bounty has used its one dispute.
@@ -137,6 +163,9 @@ pub struct ResolveSettlement {
 #[contracttype]
 pub enum DataKey {
     Config,
+    Roles,
+    Policy,
+    Paused,
     NextId,
     Bounty(u64),
     ActiveByIssue(u64, u64),

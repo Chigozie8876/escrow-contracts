@@ -66,6 +66,25 @@ fn fee_change_does_not_affect_existing_bounties() {
 }
 
 #[test]
+fn token_limit_change_only_affects_new_bounties() {
+    let c = Ctx::new();
+    let id = c.fund_with(1, 400 * UNIT, true);
+    c.client.set_token(&c.admin, &c.token, &UNIT, &100 * UNIT);
+    c.set_time(c.now() + 7 * DAY + GRACE);
+    c.client.refund(&c.maintainer, &id);
+    let result = c.client.try_fund_bounty(
+        &c.maintainer,
+        &REPO,
+        &2,
+        &c.token,
+        &(101 * UNIT),
+        &(c.now() + DAY),
+        &true,
+    );
+    assert_eq!(result.unwrap_err().unwrap(), Error::AmountTooLarge);
+}
+
+#[test]
 fn set_admin_needs_both_auths() {
     let c = Ctx::new();
     let new_admin = Address::generate(&c.env);
@@ -128,7 +147,7 @@ fn old_admin_loses_every_admin_entry_point_after_handover() {
     );
     assert_eq!(
         c.client
-            .try_set_token(&old_admin, &c.token, &1, &UNIT)
+            .try_set_token(&old_admin, &c.token, &1, &UNIT, &None)
             .unwrap_err()
             .unwrap(),
         Error::Unauthorized
@@ -170,7 +189,7 @@ fn old_admin_loses_every_admin_entry_point_after_handover() {
     c.client.set_treasury(&new_admin, &old_admin);
     c.client.set_grace(&new_admin, &1);
     c.client.set_durations(&new_admin, &1, &2);
-    c.client.set_token(&new_admin, &c.token, &1, &UNIT);
+    c.client.set_token(&new_admin, &c.token, &1, &UNIT, &None);
     c.client.remove_token(&new_admin, &c.token);
     c.client.pause(&new_admin);
     c.client.unpause(&new_admin);
@@ -219,25 +238,34 @@ fn set_token_validates() {
     let c = Ctx::new();
     assert_eq!(
         c.client
-            .try_set_token(&c.admin, &c.token, &0, &5)
+            .try_set_token(&c.admin, &c.token, &0, &5, &None)
             .unwrap_err()
             .unwrap(),
         Error::AmountTooSmall
     );
     assert_eq!(
         c.client
-            .try_set_token(&c.admin, &c.token, &5, &4)
+            .try_set_token(&c.admin, &c.token, &5, &4, &None)
             .unwrap_err()
             .unwrap(),
         Error::AmountTooLarge
+    );
+    assert_eq!(
+        c.client
+            .try_set_token(&c.admin, &c.token, &1, &100, &Some(1001))
+            .unwrap_err()
+            .unwrap(),
+        Error::InvalidFee
     );
     let t = c
         .env
         .register_stellar_asset_contract_v2(Address::generate(&c.env))
         .address();
     StellarAssetClient::new(&c.env, &t).mint(&c.maintainer, &UNIT);
-    c.client.set_token(&c.admin, &t, &1, &UNIT);
-    assert_eq!(c.client.get_token(&t).unwrap().max_amount, UNIT);
+    c.client.set_token(&c.admin, &t, &1, &UNIT, &Some(150));
+    let stored = c.client.get_token(&t).unwrap();
+    assert_eq!(stored.max_amount, UNIT);
+    assert_eq!(stored.fee_bps, Some(150));
 }
 
 #[test]
@@ -247,7 +275,7 @@ fn token_changes_emit_dedicated_events() {
         .env
         .register_stellar_asset_contract_v2(Address::generate(&c.env))
         .address();
-    c.client.set_token(&c.admin, &token, &1, &UNIT);
+    c.client.set_token(&c.admin, &token, &1, &UNIT, &None);
     c.client.remove_token(&c.admin, &token);
     assert!(c.env.events().all().events().len() >= 2);
 }
@@ -295,7 +323,7 @@ fn all_setters_require_admin() {
     );
     assert_eq!(
         c.client
-            .try_set_token(&x, &c.token, &1, &2)
+            .try_set_token(&x, &c.token, &1, &2, &None)
             .unwrap_err()
             .unwrap(),
         e
@@ -403,4 +431,48 @@ fn legacy_instance_token_is_read_until_rewritten_to_persistent_storage() {
     assert_eq!(c.client.get_token(&legacy).unwrap().max_amount, UNIT);
     c.client.set_token(&c.admin, &legacy, &2, &(2 * UNIT));
     assert_eq!(c.client.get_token(&legacy).unwrap().min_amount, 2);
+}
+
+#[test]
+fn withdraw_fees_auth_and_sweep() {
+    let c = Ctx::new();
+    let id = c.fund(1);
+    c.client.release(&c.maintainer, &id, &c.winner);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 3 * UNIT);
+
+    // Random address cannot withdraw fees
+    let stranger = Address::generate(&c.env);
+    assert_eq!(
+        c.client
+            .try_withdraw_fees(&stranger, &c.token)
+            .unwrap_err()
+            .unwrap(),
+        Error::Unauthorized
+    );
+
+    // Admin can withdraw
+    let withdrawn = c.client.withdraw_fees(&c.admin, &c.token);
+    assert_eq!(withdrawn, 3 * UNIT);
+    assert_eq!(c.bal(&c.token, &c.treasury), 3 * UNIT);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 0);
+
+    // Further withdrawal fails because accrued_fees is 0
+    assert_eq!(
+        c.client
+            .try_withdraw_fees(&c.treasury, &c.token)
+            .unwrap_err()
+            .unwrap(),
+        Error::AmountTooSmall
+    );
+
+    // Fund and release another to test treasury withdrawal
+    let id2 = c.fund(2);
+    c.client.release(&c.maintainer, &id2, &c.winner);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 3 * UNIT);
+
+    // Treasury can withdraw
+    let withdrawn2 = c.client.withdraw_fees(&c.treasury, &c.token);
+    assert_eq!(withdrawn2, 3 * UNIT);
+    assert_eq!(c.bal(&c.token, &c.treasury), 6 * UNIT);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 0);
 }

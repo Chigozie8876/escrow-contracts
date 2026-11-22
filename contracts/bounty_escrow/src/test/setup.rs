@@ -55,7 +55,7 @@ impl<'a> Ctx<'a> {
             &(90 * DAY),
         );
         for t in [&token, &token2] {
-            client.set_token(&admin, t, &UNIT, &(500 * UNIT));
+            client.set_token(&admin, t, &UNIT, &(500 * UNIT), &None);
             StellarAssetClient::new(&env, t).mint(&maintainer, &(10_000 * UNIT));
         }
         Ctx {
@@ -108,6 +108,6 @@ impl<'a> Ctx<'a> {
     pub fn assert_invariant(&self, token: &Address) {
         let t = self.client.get_totals(token);
         assert_eq!(t.funded, t.released_net + t.fees + t.refunded + t.held);
-        assert_eq!(t.held, self.contract_bal(token));
+        assert_eq!(t.held + t.accrued_fees, self.contract_bal(token));
     }
 }

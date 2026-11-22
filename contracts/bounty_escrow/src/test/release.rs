@@ -23,11 +23,17 @@ fn maintainer_releases_with_correct_fee() {
     assert_eq!(settlement.fee, 3 * UNIT);
     assert!(!settlement.deferred);
     assert_eq!(c.bal(&c.token, &c.winner), 97 * UNIT);
-    assert_eq!(c.bal(&c.token, &c.treasury), 3 * UNIT);
-    assert_eq!(c.contract_bal(&c.token), 0);
+    assert_eq!(c.bal(&c.token, &c.treasury), 0);
+    assert_eq!(c.contract_bal(&c.token), 3 * UNIT);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 3 * UNIT);
     let b = c.client.get_bounty(&id);
     assert_eq!(b.status, Status::Released);
     assert_eq!(b.winner, Some(c.winner.clone()));
+    c.assert_invariant(&c.token);
+    assert_eq!(c.client.withdraw_fees(&c.treasury, &c.token), 3 * UNIT);
+    assert_eq!(c.bal(&c.token, &c.treasury), 3 * UNIT);
+    assert_eq!(c.contract_bal(&c.token), 0);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 0);
     c.assert_invariant(&c.token);
 }
 
@@ -102,8 +108,11 @@ fn fee_snapshot_survives_fee_change_and_dust_goes_to_winner() {
     c.client.release(&c.maintainer, &id, &c.winner);
     let amount = 33 * UNIT / 10 + 1;
     let fee = amount * 300 / 10_000;
-    assert_eq!(c.bal(&c.token, &c.treasury), fee);
+    assert_eq!(c.bal(&c.token, &c.treasury), 0);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, fee);
     assert_eq!(c.bal(&c.token, &c.winner), amount - fee);
+    c.client.withdraw_fees(&c.treasury, &c.token);
+    assert_eq!(c.bal(&c.token, &c.treasury), fee);
 }
 
 #[test]
