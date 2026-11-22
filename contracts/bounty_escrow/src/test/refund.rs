@@ -95,3 +95,31 @@ fn refund_blocked_while_disputed() {
     let r = c.client.try_refund(&c.maintainer, &id);
     assert_eq!(r.unwrap_err().unwrap(), Error::InvalidStatus);
 }
+
+/// #163: grace_secs is snapshotted at funding time.
+/// Raising grace after a bounty is funded must not push that bounty's refund window.
+#[test]
+fn grace_snapshot_at_funding_time_isolates_existing_bounty() {
+    let c = Ctx::new();
+    // Fund the bounty; the bounty records grace = GRACE (3 days).
+    let id = c.fund(1);
+    assert_eq!(c.client.get_bounty(&id).grace_secs, GRACE);
+
+    // Admin raises grace to 30 days after the bounty already exists.
+    c.client.set_grace(&c.admin, &(30 * DAY));
+
+    // The existing bounty's refundable_at is still deadline + original GRACE.
+    let expected_refundable = c.now() + 7 * DAY + GRACE;
+    assert_eq!(c.client.refundable_at(&id), expected_refundable);
+
+    // Refund is still blocked one second before the original window.
+    c.set_time(expected_refundable - 1);
+    assert_eq!(
+        c.client.try_refund(&c.maintainer, &id).unwrap_err().unwrap(),
+        Error::DeadlineNotReached
+    );
+
+    // Refund succeeds at the original deadline + original grace.
+    c.set_time(expected_refundable);
+    c.client.refund(&c.maintainer, &id);
+}

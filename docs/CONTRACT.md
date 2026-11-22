@@ -9,9 +9,9 @@ Soroban escrow for GitHub issue bounties. soroban-sdk 29.0.1, target `wasm32v1-n
 | Function | Auth | Notes / errors |
 |---|---|---|
 | `init(admin, relayer, arbiter, treasury, fee_bps, grace_secs, min_dur, max_dur)` | admin | once (`AlreadyInitialized`); `fee_bps <= 1000` (`InvalidFee`); `min <= max` (`InvalidDeadline`) |
-| `fund_bounty(maintainer, repo_id, issue, token, amount, deadline, relayer_allowed) -> id` | maintainer | `Paused`, `TokenNotAllowed`, `AmountTooSmall/Large`, `InvalidDeadline`, `IssueAlreadyFunded`. Snapshots per-token fee override if set, else global `fee_bps`. |
+| `fund_bounty(maintainer, repo_id, issue, token, amount, deadline, relayer_allowed) -> id` | maintainer | `Paused`, `TokenNotAllowed`, `AmountTooSmall/Large`, `InvalidDeadline`, `IssueAlreadyFunded`. Snapshots per-token fee override if set, else global `fee_bps`. Snapshots `grace_secs` from the policy at funding time (see #163). |
 | `release(caller, id, winner)` | maintainer, or relayer if `relayer_allowed` | `InvalidStatus`, `Unauthorized`, `RelayerNotAllowed`, `SelfPayout` (winner is the maintainer or the contract itself). Allowed after deadline until refunded. Pays `amount - fee` to winner, `fee` to treasury. If the winner's transfer fails (for example, no trustline), the release still succeeds and the net becomes a claim (`deferred = true`). |
-| `refund(maintainer, id)` | maintainer | only at/after `deadline + grace` (`DeadlineNotReached`); full amount, no fee; works while paused |
+| `refund(maintainer, id)` | maintainer | only at/after `deadline + grace` (`DeadlineNotReached`); uses the `grace_secs` snapshotted into the bounty at funding time, so a later `set_grace` call cannot extend the refund window on existing bounties; full amount, no fee; works while paused |
 | `open_dispute(caller, id)` | maintainer or arbiter | Open only; freezes release and refund. One dispute per bounty (`DisputeAlreadyUsed`). |
 | `expire_dispute(caller, id)` | anyone | Disputed only; `now >= opened_at + dispute_timeout` (`DisputeNotExpired`). Returns the bounty to `Open` with no judgement. Default timeout 14 days. |
 | `extend_deadline(maintainer, id, new_deadline)` | maintainer | Open only; `new_deadline > deadline` and `<= now + max_duration` (`InvalidDeadline`). Emits `deadline_extended`. |
@@ -148,6 +148,9 @@ CI also runs `scripts/check-wasm-size.sh` after the build. It fails above 40 KiB
 
 ## Known gaps
 `upgrade` test needs the wasm built first (`./scripts/build.sh` before `cargo test`, as CI does).
+
+## Grace snapshot migration note (#163)
+`Bounty` now stores `grace_secs` (snapshotted at funding time). Bounties written to the deployed testnet contract before this change do not have this field; they will deserialise with a default of `0` for the missing value because Soroban's XDR codec fills absent trailing fields with their zero value. This means any pre-existing testnet bounty will read `grace_secs == 0` and become immediately refundable once its deadline passes (zero grace window). **Action required before mainnet:** migrate existing open bounties by re-funding them, or note in the deployment documentation that the testnet state is considered legacy and all open bounties should be settled before the upgrade is applied.
 
 ## Resolution evidence
 `resolve_with_evidence` records a 32-byte `evidence_hash` in the `evidence` event, so the evidence behind a split is anchored on-chain. Suggested digest: SHA-256 over a canonical JSON bundle of the dispute reason, the AI reviews and the arbiter's note, with keys sorted and no insignificant whitespace. The contract does not check the bundle; it stores the hash.
