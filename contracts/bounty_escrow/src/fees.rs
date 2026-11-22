@@ -4,6 +4,10 @@ pub const BPS_DENOMINATOR: i128 = 10_000;
 pub const MAX_FEE_BPS: u32 = 1_000;
 
 fn mul_div(amount: i128, bps: u32) -> Result<i128, Error> {
+    if amount < 0 {
+        return Err(Error::Overflow);
+    }
+
     amount
         .checked_mul(i128::from(bps))
         .map(|v| v / BPS_DENOMINATOR)
@@ -17,11 +21,15 @@ pub fn fee(amount: i128, bps: u32) -> Result<i128, Error> {
 
 /// amount - fee; rounding dust goes to the receiver.
 pub fn net(amount: i128, bps: u32) -> Result<i128, Error> {
-    amount.checked_sub(fee(amount, bps)?).ok_or(Error::Overflow)
+    let fee = fee(amount, bps)?;
+    amount.checked_sub(fee).ok_or(Error::Overflow)
 }
 
 /// floor(amount * winner_bps / 10_000); dust stays with the maintainer.
 pub fn portion(amount: i128, winner_bps: u32) -> Result<i128, Error> {
+    if winner_bps > BPS_DENOMINATOR as u32 {
+        return Err(Error::InvalidFee);
+    }
     mul_div(amount, winner_bps)
 }
 
@@ -79,5 +87,18 @@ mod tests {
                 assert_eq!(net(a, b).unwrap() + fee(a, b).unwrap(), a);
             }
         }
+    }
+
+    #[test]
+    fn rejects_negative_amount() {
+        assert_eq!(mul_div(-1, 300), Err(Error::Overflow));
+        assert_eq!(fee(-1, 300), Err(Error::Overflow));
+        assert_eq!(portion(-1, 300), Err(Error::Overflow));
+        assert_eq!(net(-1, 300), Err(Error::Overflow));
+    }
+
+    #[test]
+    fn rejects_out_of_range_portion_bps() {
+        assert_eq!(portion(1_000_000, 10_001), Err(Error::InvalidFee));
     }
 }
