@@ -1,3 +1,46 @@
+//! Fee and split arithmetic.
+//!
+//! Every product is a checked multiply followed by an integer floor division by
+//! 10_000. Dust is never burned: `fee`/`net` leave it with the receiver,
+//! `portion` leaves it with the maintainer, and split callers assign it to the
+//! first winner explicitly. Amounts are in the token's smallest unit (stroops
+//! for the native asset). All numbers below are asserted by
+//! `tests::worked_examples`, and the same tables appear in docs/CONTRACT.md.
+//!
+//! # Release — one fee on the full amount, at the `fee_bps` snapshotted at funding
+//!
+//! | amount | fee_bps | fee | net to winner |
+//! |---:|---:|---:|---:|
+//! | 1_000_000 | 0 | 0 | 1_000_000 |
+//! | 1_000_000 | 300 | 30_000 | 970_000 |
+//! | 1 | 300 | 0 | 1 |
+//! | 33 | 300 | 0 | 33 |
+//! | 34 | 300 | 1 | 33 |
+//!
+//! # Resolve — fee on the winner's portion only
+//!
+//! `portion = floor(amount * winner_bps / 10_000)`; the maintainer keeps
+//! `amount - portion`. The fee is taken from the portion, not the whole bounty.
+//!
+//! | amount | winner_bps | fee_bps | portion | fee | winner net | maintainer |
+//! |---:|---:|---:|---:|---:|---:|---:|
+//! | 1_000_000 | 0 | 300 | 0 | 0 | 0 | 1_000_000 |
+//! | 1_000_000 | 5_000 | 300 | 500_000 | 15_000 | 485_000 | 500_000 |
+//! | 1_000_000 | 7_000 | 300 | 700_000 | 21_000 | 679_000 | 300_000 |
+//! | 1_000_000 | 10_000 | 300 | 1_000_000 | 30_000 | 970_000 | 0 |
+//! | 3 | 3_333 | 300 | 0 | 0 | 0 | 3 |
+//!
+//! # Release split — one fee on the full amount, dust to the first winner
+//!
+//! Each winner after the first gets `floor(net * share_bps / 10_000)`; the
+//! first winner gets `net - sum(others)`, so all rounding dust goes there.
+//!
+//! | amount | fee_bps | shares | fee | payouts |
+//! |---:|---:|---|---:|---|
+//! | 1_000_000 | 300 | 5_000 / 5_000 | 30_000 | 485_000 + 485_000 |
+//! | 10_001 | 300 | 3_334 / 3_333 / 3_333 | 300 | 3_235 + 3_233 + 3_233 |
+//! | 1_000_000 | 0 | 2_000 / 3_000 / 5_000 | 0 | 200_000 + 300_000 + 500_000 |
+
 use crate::errors::Error;
 
 pub const BPS_DENOMINATOR: i128 = 10_000;
@@ -105,5 +148,53 @@ mod tests {
     #[test]
     fn rejects_out_of_range_portion_bps() {
         assert_eq!(portion(1_000_000, 10_001), Err(Error::InvalidFee));
+    }
+
+    #[test]
+    fn worked_examples() {
+        // Release: one fee on the full amount. Tiny amounts round down; the
+        // dust stays with the winner. fee = 0 is the zero-fee case.
+        assert_eq!(fee(1_000_000, 0), Ok(0));
+        assert_eq!(net(1_000_000, 0), Ok(1_000_000));
+        assert_eq!(fee(1_000_000, 300), Ok(30_000));
+        assert_eq!(net(1_000_000, 300), Ok(970_000));
+        assert_eq!(fee(1, 300), Ok(0));
+        assert_eq!(net(1, 300), Ok(1));
+        assert_eq!(fee(33, 300), Ok(0));
+        assert_eq!(net(33, 300), Ok(33));
+        assert_eq!(fee(34, 300), Ok(1));
+        assert_eq!(net(34, 300), Ok(33));
+
+        // Resolve: portion -> fee -> winner net, maintainer keeps the rest.
+        let resolve = |amount: i128, winner_bps: u32, bps: u32| {
+            let p = portion(amount, winner_bps).unwrap();
+            let f = fee(p, bps).unwrap();
+            let winner_net = net(p, bps).unwrap();
+            (p, f, winner_net, amount - p)
+        };
+        assert_eq!(resolve(1_000_000, 0, 300), (0, 0, 0, 1_000_000));
+        assert_eq!(resolve(1_000_000, 5_000, 300), (500_000, 15_000, 485_000, 500_000));
+        assert_eq!(resolve(1_000_000, 7_000, 300), (700_000, 21_000, 679_000, 300_000));
+        assert_eq!(resolve(1_000_000, 10_000, 300), (1_000_000, 30_000, 970_000, 0));
+        assert_eq!(resolve(3, 3_333, 300), (0, 0, 0, 3));
+
+        // Release split: one fee on the full amount, first winner takes dust.
+        let n = net(1_000_000, 300).unwrap();
+        let second = share(n, 5_000).unwrap();
+        assert_eq!(fee(1_000_000, 300), Ok(30_000));
+        assert_eq!(second, 485_000);
+        assert_eq!(n - second, 485_000);
+
+        let n = net(10_001, 300).unwrap();
+        assert_eq!(n, 9_701);
+        let s2 = share(n, 3_333).unwrap();
+        let s3 = share(n, 3_333).unwrap();
+        assert_eq!((s2, s3), (3_233, 3_233));
+        assert_eq!(n - s2 - s3, 3_235);
+
+        let n = net(1_000_000, 0).unwrap();
+        assert_eq!(share(n, 2_000).unwrap(), 200_000);
+        assert_eq!(share(n, 3_000).unwrap(), 300_000);
+        assert_eq!(share(n, 5_000).unwrap(), 500_000);
     }
 }
