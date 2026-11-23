@@ -194,3 +194,101 @@ fn bounty_count_tracks_created_bounties() {
     c.fund(3);
     assert_eq!(c.client.bounty_count(), 3);
 }
+
+// ── Deadline window property test (#106) ─────────────────────────────────────
+
+mod deadline_window {
+    use proptest::prelude::*;
+    use std::vec;
+    use std::vec::Vec;
+
+    use super::super::setup::*;
+    use crate::Error;
+
+    /// The specification, written independently of the contract code. An
+    /// overflow of either bound is reported before the deadline itself is checked.
+    fn expected(now: u64, min: u64, max: u64, deadline: u64) -> Result<(), Error> {
+        match (now.checked_add(min), now.checked_add(max)) {
+            (Some(earliest), Some(latest)) => {
+                if deadline < earliest || deadline > latest {
+                    Err(Error::InvalidDeadline)
+                } else {
+                    Ok(())
+                }
+            }
+            _ => Err(Error::Overflow),
+        }
+    }
+
+    /// Deadlines at and around the window edges, including values that wrap.
+    fn interesting_deadlines(now: u64, min: u64, max: u64) -> Vec<u64> {
+        let mut out = vec![0, 1, u64::MAX - 1, u64::MAX];
+        if let Some(v) = now.checked_add(min) {
+            out.push(v);
+            if let Some(w) = v.checked_sub(1) {
+                out.push(w);
+            }
+        }
+        if let Some(v) = now.checked_add(max) {
+            out.push(v);
+            if let Some(w) = v.checked_add(1) {
+                out.push(w);
+            }
+        }
+        out
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        #[test]
+        fn fund_bounty_accepts_exactly_the_specified_window(
+            now in any::<u64>(),
+            min in any::<u64>(),
+            max in any::<u64>(),
+            pick in any::<prop::sample::Index>(),
+            random_deadline in any::<u64>(),
+        ) {
+            prop_assume!(min <= max);
+            let deadline = {
+                let candidates = interesting_deadlines(now, min, max);
+                if pick.index(2) == 0 {
+                    candidates[pick.index(candidates.len())]
+                } else {
+                    random_deadline
+                }
+            };
+
+            let c = Ctx::new();
+            c.set_time(now);
+            c.client.set_durations(&c.admin, &min, &max);
+
+            let got = c.client.try_fund_bounty(
+                &c.maintainer,
+                &REPO,
+                &1,
+                &c.token,
+                &UNIT,
+                &deadline,
+                &false,
+            );
+
+            match expected(now, min, max, deadline) {
+                Ok(()) => prop_assert!(matches!(got, Ok(Ok(_)))),
+                Err(err) => prop_assert_eq!(got.unwrap_err().unwrap(), err),
+            }
+        }
+    }
+
+    #[test]
+    fn overflow_near_u64_max_is_reported_not_wrapped() {
+        let c = Ctx::new();
+        c.set_time(u64::MAX - DAY);
+        c.client.set_durations(&c.admin, &DAY, &(2 * DAY));
+
+        let got =
+            c.client
+                .try_fund_bounty(&c.maintainer, &REPO, &1, &c.token, &UNIT, &u64::MAX, &false);
+        assert_eq!(got.unwrap_err().unwrap(), Error::Overflow);
+    }
+}
