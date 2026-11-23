@@ -176,7 +176,9 @@ Stable numbering — **never renumbered after deploy**, because clients map on t
 ### Events
 
 Every state change emits one, with enough data that an indexer never needs a follow-up read:
-`funded` · `released` (with `deferred`) · `refunded` · `disputed` · `resolved` (with `winner_deferred`) · `deadline_extended` · `topped_up` · `dispute_expired` · `claimed` · `config` · `paused` · `unpaused` · `upgraded`.
+`funded` · `released` (with `deferred`) · `released_split` · `refunded` · `disputed` · `resolved` (with `winner_deferred`) · `evidence` · `deadline_extended` · `topped_up` · `dispute_expired` · `claimed` · `initialized` · `config` · `token_set` · `token_removed` · `paused` · `unpaused` · `upgrade_proposed` · `upgrade_cancelled` · `upgraded`.
+
+See [`docs/EVENTS.md`](docs/EVENTS.md) for full topic layouts, field definitions, and example JSON payloads for every event.
 
 ---
 
@@ -330,6 +332,7 @@ It fetches the Wasm running at the recorded contract id and compares its hash wi
 |---|---|
 | **Application** | [Soroban-escrow/escrow-app](https://github.com/Soroban-escrow/escrow-app) — API, worker, web app, AI review |
 | **Contract reference** | [`docs/CONTRACT.md`](docs/CONTRACT.md) — every entry point, error, event, fee example and TTL number |
+| **Events reference** | [`docs/EVENTS.md`](docs/EVENTS.md) — indexer event topics, fields, and example payloads |
 | **Operations runbook** | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — pause, relayer rotation, upgrades and incident response |
 | **Threat model** | [`docs/THREAT.md`](docs/THREAT.md) — per-role, token and network risks |
 | **Build log** | [`docs/PROGRESS.md`](docs/PROGRESS.md) |
