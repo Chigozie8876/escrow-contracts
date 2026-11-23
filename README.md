@@ -47,6 +47,7 @@ decides *whether a payment is allowed at all*, and that is the part you should a
 | **Tests** | 63, including a property test of the funds invariant |
 | **Built with** | Rust 1.99.1 · `soroban-sdk` 29.0.1 · target `wasm32v1-none` |
 | **Audited** | ❌ **No.** See [Before mainnet](#before-mainnet). |
+| **License** | [Apache-2.0](LICENSE) |
 
 ---
 
@@ -340,4 +341,11 @@ It fetches the Wasm running at the recorded contract id and compares its hash wi
 | **Operations runbook** | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — pause, relayer rotation, upgrades and incident response |
 | **Threat model** | [`docs/THREAT.md`](docs/THREAT.md) — per-role, token and network risks |
 | **Security policy** | [`SECURITY.md`](SECURITY.md) — vulnerability disclosure process and private reporting channel |
+| **License** | [`LICENSE`](LICENSE) — Apache License 2.0 terms |
 | **Build log** | [`docs/PROGRESS.md`](docs/PROGRESS.md) |
+
+---
+
+## License
+
+This repository and its smart contracts are licensed under the [Apache-2.0 License](LICENSE).
