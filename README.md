@@ -165,14 +165,15 @@ contract. `pause` blocks `fund_bounty` and nothing else.
 Stable numbering — **never renumbered after deploy**, because clients map on the number:
 
 ```
- 1 AlreadyInitialized    7 AmountTooLarge     13 SelfPayout
- 2 NotInitialized        8 InvalidDeadline    14 InvalidSplit
- 3 Unauthorized          9 IssueAlreadyFunded 15 InvalidFee
- 4 Paused               10 BountyNotFound     16 Overflow
- 5 TokenNotAllowed      11 InvalidStatus      17 RelayerNotAllowed
- 6 AmountTooSmall       12 DeadlineNotReached
-18 TopUpLimitReached    24 UnexpectedTransferAmount
+ 1 AlreadyInitialized    7 AmountTooLarge     13 SelfPayout                 19 DisputeNotExpired        25 InvalidWinners           31 InvalidLimits
+ 2 NotInitialized        8 InvalidDeadline    14 InvalidSplit               20 DisputeAlreadyUsed       26 UpgradeNotReady
+ 3 Unauthorized          9 IssueAlreadyFunded 15 InvalidFee                 21 NothingToClaim           27 NoPendingUpgrade
+ 4 Paused               10 BountyNotFound     16 Overflow                   22 AlreadyClaimed           28 UpgradeDelayCannotDecrease
+ 5 TokenNotAllowed      11 InvalidStatus      17 RelayerNotAllowed          23 ConflictOfInterest       29 InvalidKey
+ 6 AmountTooSmall       12 DeadlineNotReached 18 TopUpLimitReached          24 RelayerLimitExceeded     30 ContractAddressRejected
 ```
+
+See [`docs/CONTRACT.md`](docs/CONTRACT.md#error-codes--client-recovery-actions) for the complete reference table detailing causes, affected entry points, and suggested client UI recovery actions for every error code.
 
 ### Events
 
