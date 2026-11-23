@@ -43,7 +43,7 @@ decides *whether a payment is allowed at all*, and that is the part you should a
 | | |
 |---|---|
 | **Deployed on testnet** | [`CCEKBPYC…ZF3J4RKN`](https://stellar.expert/explorer/testnet/contract/CCEKBPYCWKNTXIQLXJHVAF7RYGUZZ6MITA7VVJBOK5BHXUO44ELZ4F4V) |
-| **Size** | 32,783 bytes of Wasm (40 KiB CI gate), 32 entry points |
+| **Size** | 32,783 bytes of Wasm (40 KiB CI gate), 36 entry points |
 | **Tests** | 63, including a property test of the funds invariant |
 | **Built with** | Rust 1.99.1 · `soroban-sdk` 29.0.1 · target `wasm32v1-none` |
 | **Audited** | ❌ **No.** See [Before mainnet](#before-mainnet). |
@@ -329,5 +329,7 @@ It fetches the Wasm running at the recorded contract id and compares its hash wi
 | | |
 |---|---|
 | **Application** | [Soroban-escrow/escrow-app](https://github.com/Soroban-escrow/escrow-app) — API, worker, web app, AI review |
-| **Contract reference** | [`docs/CONTRACT.md`](docs/CONTRACT.md) — every entry point, error, event and TTL number |
+| **Contract reference** | [`docs/CONTRACT.md`](docs/CONTRACT.md) — every entry point, error, event, fee example and TTL number |
+| **Operations runbook** | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — pause, relayer rotation, upgrades and incident response |
+| **Threat model** | [`docs/THREAT.md`](docs/THREAT.md) — per-role, token and network risks |
 | **Build log** | [`docs/PROGRESS.md`](docs/PROGRESS.md) |
