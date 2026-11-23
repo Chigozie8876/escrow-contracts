@@ -335,4 +335,5 @@ It fetches the Wasm running at the recorded contract id and compares its hash wi
 | **Events reference** | [`docs/EVENTS.md`](docs/EVENTS.md) — indexer event topics, fields, and example payloads |
 | **Operations runbook** | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — pause, relayer rotation, upgrades and incident response |
 | **Threat model** | [`docs/THREAT.md`](docs/THREAT.md) — per-role, token and network risks |
+| **Security policy** | [`SECURITY.md`](SECURITY.md) — vulnerability disclosure process and private reporting channel |
 | **Build log** | [`docs/PROGRESS.md`](docs/PROGRESS.md) |
