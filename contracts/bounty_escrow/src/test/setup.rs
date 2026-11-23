@@ -105,6 +105,29 @@ impl<'a> Ctx<'a> {
         )
     }
 
+    /// A second maintainer, independent of `Ctx::maintainer` and funded on
+    /// `token`, for testing that one maintainer's authority never reaches
+    /// another maintainer's bounty (#100).
+    pub fn second_maintainer(&self) -> Address {
+        let other = Address::generate(&self.env);
+        StellarAssetClient::new(&self.env, &self.token).mint(&other, &(10_000 * UNIT));
+        other
+    }
+
+    /// Funds a bounty on `token` as the given maintainer (rather than the
+    /// default `Ctx::maintainer`). 100 units, 7 days, relayer allowed.
+    pub fn fund_as(&self, maintainer: &Address, issue: u64) -> u64 {
+        self.client.fund_bounty(
+            maintainer,
+            &REPO,
+            &issue,
+            &self.token,
+            &(100 * UNIT),
+            &(self.now() + 7 * DAY),
+            &true,
+        )
+    }
+
     pub fn assert_invariant(&self, token: &Address) {
         let t = self.client.get_totals(token);
         assert_eq!(t.funded, t.released_net + t.fees + t.refunded + t.held);

@@ -243,7 +243,52 @@ fn relayer_limit_caps_and_rolls_over_but_maintainer_bypasses() {
     c.client.release(&c.relayer, &third, &c.winner);
 }
 
+// ── Cross-maintainer isolation (#100) ────────────────────────────────────────
+
+#[test]
+fn maintainer_b_cannot_release_or_dispute_maintainer_as_bounty() {
+    let c = Ctx::new();
+    let maintainer_b = c.second_maintainer();
+    let id_a = c.fund(1);
+
+    let r = c.client.try_release(&maintainer_b, &id_a, &c.winner);
+    assert_eq!(r.unwrap_err().unwrap(), Error::Unauthorized);
+    let r = c.client.try_open_dispute(&maintainer_b, &id_a);
+    assert_eq!(r.unwrap_err().unwrap(), Error::Unauthorized);
+
+    // B's own funds and bounty are untouched by the rejected attempts.
+    assert_eq!(c.bal(&c.token, &maintainer_b), 10_000 * UNIT);
+    assert_eq!(c.client.get_bounty(&id_a).status, Status::Open);
+
+    // The real maintainer can still release normally.
+    c.client.release(&c.maintainer, &id_a, &c.winner);
+    assert_eq!(c.bal(&c.token, &c.winner), 97 * UNIT);
+}
+
 // ── Fee extremes end to end (#107) ───────────────────────────────────────────
+
+// ── Relayer configured as its own bounty's maintainer (#101) ────────────────
+
+#[test]
+fn relayer_release_as_its_own_bounty_maintainer_takes_maintainer_path() {
+    let c = Ctx::new();
+    // The bounty opts out of relayer release...
+    let id = c.fund_with(1, 100 * UNIT, false);
+    // ...but the configured relayer is also this bounty's maintainer.
+    c.client.set_relayer(&c.admin, &c.maintainer);
+
+    // `authorize_release` checks `caller == maintainer` first, so this takes
+    // the maintainer path and succeeds even though `relayer_allowed` is
+    // false and no relayer rate limit applies here.
+    let settlement = c.client.release(&c.maintainer, &id, &c.winner);
+    assert!(!settlement.deferred);
+    assert_eq!(c.bal(&c.token, &c.winner), 97 * UNIT);
+
+    // SelfPayout is still enforced in this configuration.
+    let id2 = c.fund_with(2, 100 * UNIT, false);
+    let r = c.client.try_release(&c.maintainer, &id2, &c.maintainer);
+    assert_eq!(r.unwrap_err().unwrap(), Error::SelfPayout);
+}
 
 #[test]
 fn release_at_max_fee_pays_ninety_percent_and_accrues_ten_percent() {

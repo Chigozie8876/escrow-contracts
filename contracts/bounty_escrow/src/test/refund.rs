@@ -96,6 +96,26 @@ fn refund_blocked_while_disputed() {
     assert_eq!(r.unwrap_err().unwrap(), Error::InvalidStatus);
 }
 
+/// #100: one maintainer's authority must never reach another maintainer's
+/// bounty. `Error::Unauthorized` on refund, with no effect on B's balance or
+/// bounty A's status.
+#[test]
+fn maintainer_b_cannot_refund_maintainer_as_bounty() {
+    let c = Ctx::new();
+    let maintainer_b = c.second_maintainer();
+    let id_a = c.fund(1);
+    c.set_time(c.now() + 7 * DAY + GRACE);
+
+    let r = c.client.try_refund(&maintainer_b, &id_a);
+    assert_eq!(r.unwrap_err().unwrap(), Error::Unauthorized);
+    assert_eq!(c.bal(&c.token, &maintainer_b), 10_000 * UNIT);
+    assert_eq!(c.client.get_bounty(&id_a).status, Status::Open);
+
+    // The real maintainer can still refund normally.
+    c.client.refund(&c.maintainer, &id_a);
+    assert_eq!(c.client.get_bounty(&id_a).status, Status::Refunded);
+}
+
 /// #163: grace_secs is snapshotted at funding time.
 /// Raising grace after a bounty is funded must not push that bounty's refund window.
 #[test]
