@@ -62,6 +62,23 @@ pub struct Resolved {
     pub winner_deferred: bool,
 }
 
+#[contractevent(topics = ["bounty", "initialized"])]
+pub struct Initialized {
+    #[topic]
+    pub admin: Address,
+    #[topic]
+    pub relayer: Address,
+    #[topic]
+    pub arbiter: Address,
+    #[topic]
+    pub treasury: Address,
+    pub fee_bps: u32,
+    pub grace_secs: u64,
+    pub min_duration_secs: u64,
+    pub max_duration_secs: u64,
+    pub paused: bool,
+}
+
 #[contractevent(topics = ["bounty", "config"])]
 pub struct ConfigChanged {
     #[topic]

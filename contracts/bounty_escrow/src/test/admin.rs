@@ -21,6 +21,22 @@ fn init_once() {
 }
 
 #[test]
+fn init_emits_initialized_event() {
+    let c = Ctx::new();
+    let a = Address::generate(&c.env);
+    c.client.try_init(&a, &a, &a, &a, &300, &DAY, &DAY, &(90 * DAY)).unwrap();
+    let events = c.env.events().all().events();
+    let init_events: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            !e.topics.is_empty()
+                && e.topics[0] == soroban_sdk::Symbol::new(&c.env, "bounty")
+        })
+        .collect();
+    assert_eq!(init_events.len(), 1);
+}
+
+#[test]
 fn init_validates() {
     let env = soroban_sdk::Env::default();
     env.mock_all_auths();
@@ -241,14 +257,14 @@ fn set_token_validates() {
             .try_set_token(&c.admin, &c.token, &0, &5, &None)
             .unwrap_err()
             .unwrap(),
-        Error::AmountTooSmall
+        Error::InvalidLimits
     );
     assert_eq!(
         c.client
             .try_set_token(&c.admin, &c.token, &5, &4, &None)
             .unwrap_err()
             .unwrap(),
-        Error::AmountTooLarge
+        Error::InvalidLimits
     );
     assert_eq!(
         c.client
@@ -425,6 +441,7 @@ fn legacy_instance_token_is_read_until_rewritten_to_persistent_storage() {
             &TokenLimits {
                 min_amount: 1,
                 max_amount: UNIT,
+                fee_bps: None,
             },
         );
     });

@@ -15,6 +15,7 @@ pub const TTL_THRESHOLD: u32 = 30 * DAY_LEDGERS;
 pub const TTL_EXTEND_TO: u32 = 120 * DAY_LEDGERS;
 const _: () = assert!(TTL_EXTEND_TO - TTL_THRESHOLD >= 90 * DAY_LEDGERS);
 const _: () = assert!(TTL_EXTEND_TO <= 3_110_400);
+pub(crate) const MAX_BOUNTIES_LIMIT: u32 = 256;
 
 pub fn bump_instance(env: &Env) {
     env.storage()
