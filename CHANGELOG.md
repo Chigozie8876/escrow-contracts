@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Unreleased]
 
 ### Added
+- **`LICENSE`**: Added Apache-2.0 license file, set package license field in `Cargo.toml`, and referenced in `README.md` (#118).
+- **Issue & Pull Request Templates**: Added GitHub bug report (`bug_report.md`), feature request (`feature_request.md`), and PR checklist (`pull_request_template.md`) templates referencing `docs/CONTRACT.md` and verifying tests, error numbering, and documentation sync (#122).
+- **Public Entry Point Rustdoc**: Wrote comprehensive `///` rustdoc documentation for all 36 public contract entry points in `contracts/bounty_escrow/src/lib.rs` detailing caller authorization, validation checks, and returned errors (#123).
+- **Error Reference & Client Recovery Actions**: Documented all 31 error variants in `contracts/bounty_escrow/src/errors.rs` with causes, entry points, and UI recovery actions; added matching error reference table to `docs/CONTRACT.md` and linked from `README.md` (#125).
 - **`docs/EVENTS.md`**: Dedicated contract events reference document detailing topic layouts, field schemas, indexing guidelines, and example JSON payloads for all 20 events (#124).
 - **`SECURITY.md`**: Vulnerability disclosure policy establishing private reporting channels, 24–48h SLA response times, scope covering contracts and scripts, and safe harbor protections (#119).
 - **`CONTRIBUTING.md`**: Contributor documentation detailing pinned toolchains, build-before-test ordering requirements, CI pipelines, error/storage stability invariants, and contract interface changelog requirements (#120).
