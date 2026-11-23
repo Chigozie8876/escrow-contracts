@@ -1,8 +1,4 @@
-use soroban_sdk::{
-    testutils::Address as _,
-    token::StellarAssetClient,
-    Address,
-};
+use soroban_sdk::{testutils::Address as _, token::StellarAssetClient, Address};
 
 use crate::{
     errors::Error,

@@ -221,11 +221,10 @@ fn resolve_with_evidence_pays_out_and_records_the_hash() {
     let hash = BytesN::from_array(&c.env, &[7u8; 32]);
     c.client
         .resolve_with_evidence(&c.arbiter, &id, &Some(c.winner.clone()), &10_000, &hash);
-    assert_eq!(c.client.get_bounty(&id).status, Status::Resolved);
-
     // Events of the last invocation: the evidence record comes last.
     let all = c.env.events().all();
     let events = all.events();
+    assert_eq!(c.client.get_bounty(&id).status, Status::Resolved);
     let expected = EvidenceRecorded {
         id,
         arbiter: c.arbiter.clone(),
@@ -250,4 +249,73 @@ fn resolve_with_evidence_still_rejects_the_arbiter_as_winner() {
         &hash,
     );
     assert_eq!(r.unwrap_err().unwrap(), Error::ConflictOfInterest);
+}
+
+// ── Fee extremes and remove_token during a dispute (#107, #108) ──────────────
+
+#[test]
+fn resolve_at_max_fee_with_even_split_is_exact() {
+    let c = Ctx::new();
+    c.client.set_fee(&c.admin, &crate::fees::MAX_FEE_BPS);
+    let id = disputed(&c);
+    let maintainer_before = c.bal(&c.token, &c.maintainer);
+
+    let settlement = c
+        .client
+        .resolve(&c.arbiter, &id, &Some(c.winner.clone()), &5_000);
+
+    // Fee comes off the winner's half only: 50 UNIT portion, 10% fee.
+    assert_eq!(settlement.winner_net, 45 * UNIT);
+    assert_eq!(settlement.fee, 5 * UNIT);
+    assert_eq!(settlement.maintainer_amount, 50 * UNIT);
+    assert_eq!(c.bal(&c.token, &c.winner), 45 * UNIT);
+    assert_eq!(
+        c.bal(&c.token, &c.maintainer),
+        maintainer_before + 50 * UNIT
+    );
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 5 * UNIT);
+    c.assert_invariant(&c.token);
+}
+
+// ── remove_token during a dispute (#108) ─────────────────────────────────────
+
+#[test]
+fn remove_token_during_dispute_does_not_block_resolve() {
+    let c = Ctx::new();
+    let id = disputed(&c);
+
+    c.client.remove_token(&c.admin, &c.token);
+    assert!(c.client.get_token(&c.token).is_none());
+
+    let settlement = c
+        .client
+        .resolve(&c.arbiter, &id, &Some(c.winner.clone()), &10_000);
+
+    assert_eq!(settlement.winner_net, 97 * UNIT);
+    assert_eq!(settlement.fee, 3 * UNIT);
+    assert_eq!(settlement.maintainer_amount, 0);
+    assert_eq!(c.bal(&c.token, &c.winner), 97 * UNIT);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 3 * UNIT);
+    c.assert_invariant(&c.token);
+}
+
+#[test]
+fn remove_token_during_dispute_refund_path_returns_funds() {
+    let c = Ctx::new();
+    let maintainer_start = c.bal(&c.token, &c.maintainer);
+    let id = disputed(&c);
+
+    c.client.remove_token(&c.admin, &c.token);
+
+    // The dispute expires back to Open, then the bounty is refunded after deadline + grace.
+    c.set_time(c.now() + c.client.get_dispute_timeout());
+    c.client.expire_dispute(&c.maintainer, &id);
+    c.set_time(c.client.get_bounty(&id).deadline + GRACE);
+
+    let settlement = c.client.refund(&c.maintainer, &id);
+
+    assert_eq!(settlement.amount, 100 * UNIT);
+    assert_eq!(c.bal(&c.token, &c.maintainer), maintainer_start);
+    assert_eq!(c.contract_bal(&c.token), 0);
+    c.assert_invariant(&c.token);
 }

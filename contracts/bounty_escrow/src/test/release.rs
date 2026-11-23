@@ -242,3 +242,21 @@ fn relayer_limit_caps_and_rolls_over_but_maintainer_bypasses() {
     c.set_time(c.now() + DAY);
     c.client.release(&c.relayer, &third, &c.winner);
 }
+
+// ── Fee extremes end to end (#107) ───────────────────────────────────────────
+
+#[test]
+fn release_at_max_fee_pays_ninety_percent_and_accrues_ten_percent() {
+    let c = Ctx::new();
+    c.client.set_fee(&c.admin, &crate::fees::MAX_FEE_BPS);
+    let id = c.fund(1);
+
+    let settlement = c.client.release(&c.maintainer, &id, &c.winner);
+
+    assert_eq!(settlement.net, 90 * UNIT);
+    assert_eq!(settlement.fee, 10 * UNIT);
+    assert!(!settlement.deferred);
+    assert_eq!(c.bal(&c.token, &c.winner), 90 * UNIT);
+    assert_eq!(c.client.get_totals(&c.token).accrued_fees, 10 * UNIT);
+    c.assert_invariant(&c.token);
+}

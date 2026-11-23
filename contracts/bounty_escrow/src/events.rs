@@ -2,6 +2,14 @@ use soroban_sdk::{contractevent, Address, BytesN, Symbol, Vec};
 
 use crate::types::SplitPayout;
 
+#[contractevent(topics = ["bounty", "fees_withdrawn"])]
+pub struct FeesWithdrawn {
+    #[topic]
+    pub token: Address,
+    pub treasury: Address,
+    pub amount: i128,
+}
+
 #[contractevent(topics = ["bounty", "funded"])]
 pub struct Funded {
     #[topic]

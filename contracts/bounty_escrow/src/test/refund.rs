@@ -115,7 +115,10 @@ fn grace_snapshot_at_funding_time_isolates_existing_bounty() {
     // Refund is still blocked one second before the original window.
     c.set_time(expected_refundable - 1);
     assert_eq!(
-        c.client.try_refund(&c.maintainer, &id).unwrap_err().unwrap(),
+        c.client
+            .try_refund(&c.maintainer, &id)
+            .unwrap_err()
+            .unwrap(),
         Error::DeadlineNotReached
     );
 
