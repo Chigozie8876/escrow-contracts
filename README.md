@@ -245,6 +245,8 @@ Opt out and the relayer key is worthless against that bounty; the maintainer sig
 
 ## Testing
 
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for toolchain setup, build-before-test ordering, stability invariants, and full CI pipeline details.
+
 ```bash
 make check
 ```
@@ -333,6 +335,8 @@ It fetches the Wasm running at the recorded contract id and compares its hash wi
 | **Application** | [Soroban-escrow/escrow-app](https://github.com/Soroban-escrow/escrow-app) — API, worker, web app, AI review |
 | **Contract reference** | [`docs/CONTRACT.md`](docs/CONTRACT.md) — every entry point, error, event, fee example and TTL number |
 | **Events reference** | [`docs/EVENTS.md`](docs/EVENTS.md) — indexer event topics, fields, and example payloads |
+| **Contributing** | [`CONTRIBUTING.md`](CONTRIBUTING.md) — toolchain, build order, stability invariants, and CI |
+| **Changelog** | [`CHANGELOG.md`](CHANGELOG.md) — contract interface versions and breaking changes |
 | **Operations runbook** | [`docs/RUNBOOK.md`](docs/RUNBOOK.md) — pause, relayer rotation, upgrades and incident response |
 | **Threat model** | [`docs/THREAT.md`](docs/THREAT.md) — per-role, token and network risks |
 | **Security policy** | [`SECURITY.md`](SECURITY.md) — vulnerability disclosure process and private reporting channel |
