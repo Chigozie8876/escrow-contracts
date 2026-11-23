@@ -1,9 +1,9 @@
-use soroban_sdk::{Address, Env};
+use soroban_sdk::{Address, Env, Vec};
 
 use crate::errors::Error;
 use crate::types::{
     Bounty, ClaimRecord, Config, DataKey, DisputeRecord, PendingUpgrade, RelayerLimit,
-    RelayerUsage, TokenLimits, Totals,
+    RelayerUsage, Status, TokenLimits, Totals,
 };
 
 // Ledgers close about every 5 s: 17_280 per day. Testnet max entry TTL is
@@ -16,6 +16,41 @@ pub const TTL_EXTEND_TO: u32 = 120 * DAY_LEDGERS;
 const _: () = assert!(TTL_EXTEND_TO - TTL_THRESHOLD >= 90 * DAY_LEDGERS);
 const _: () = assert!(TTL_EXTEND_TO <= 3_110_400);
 pub(crate) const MAX_BOUNTIES_LIMIT: u32 = 256;
+
+/// Up to `limit` bounties starting at id `start`, capped at MAX_BOUNTIES_LIMIT.
+/// Open and disputed bounties get their TTL extended as they are read.
+pub fn get_bounties(env: &Env, start: u64, limit: u32) -> Vec<Bounty> {
+    let capped_limit = limit.min(MAX_BOUNTIES_LIMIT);
+    let mut list = Vec::new(env);
+    if capped_limit == 0 {
+        return list;
+    }
+    let max_id: u64 = env.storage().instance().get(&DataKey::NextId).unwrap_or(1);
+    let mut id = start;
+    while id < max_id && list.len() < capped_limit {
+        let key = DataKey::Bounty(id);
+        if let Some(b) = env.storage().persistent().get::<DataKey, Bounty>(&key) {
+            if b.status == Status::Open || b.status == Status::Disputed {
+                bump_persistent(env, &key);
+            }
+            list.push_back(b);
+        }
+        id = match id.checked_add(1) {
+            Some(next) => next,
+            None => break,
+        };
+    }
+    list
+}
+
+/// Number of bounties ever created (ids are 1..=count).
+pub fn bounty_count(env: &Env) -> u64 {
+    env.storage()
+        .instance()
+        .get(&DataKey::NextId)
+        .unwrap_or(1u64)
+        .saturating_sub(1)
+}
 
 pub fn bump_instance(env: &Env) {
     env.storage()
@@ -69,10 +104,17 @@ pub fn remove_token(env: &Env, token: &Address) {
     env.storage().instance().remove(&key);
 }
 
-fn bump_persistent(env: &Env, key: &DataKey) {
+pub fn bump_persistent(env: &Env, key: &DataKey) {
     env.storage()
         .persistent()
         .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
+}
+
+/// Extends a persistent entry to the maximum TTL regardless of its current remaining life.
+pub fn bump_persistent_max(env: &Env, key: &DataKey) {
+    env.storage()
+        .persistent()
+        .extend_ttl(key, TTL_EXTEND_TO, TTL_EXTEND_TO);
 }
 
 pub fn get_bounty(env: &Env, id: u64) -> Result<Bounty, Error> {
@@ -115,10 +157,7 @@ pub fn clear_active(env: &Env, repo_id: u64, issue: u64) {
 
 pub fn get_totals(env: &Env, token: &Address) -> Totals {
     let key = DataKey::Totals(token.clone());
-    match env.storage().persistent().get(&key) {
-        Some(t) => t,
-        None => Totals::default(),
-    }
+    env.storage().persistent().get(&key).unwrap_or_default()
 }
 
 pub fn set_totals(env: &Env, token: &Address, t: &Totals) {

@@ -70,7 +70,7 @@ pub fn net(amount: i128, bps: u32) -> Result<i128, Error> {
 
 /// floor(amount * winner_bps / 10_000); dust stays with the maintainer.
 pub fn portion(amount: i128, winner_bps: u32) -> Result<i128, Error> {
-    if winner_bps > BPS_DENOMINATOR as u32 {
+    if winner_bps > 10_000 {
         return Err(Error::InvalidFee);
     }
     mul_div(amount, winner_bps)
@@ -173,9 +173,18 @@ mod tests {
             (p, f, winner_net, amount - p)
         };
         assert_eq!(resolve(1_000_000, 0, 300), (0, 0, 0, 1_000_000));
-        assert_eq!(resolve(1_000_000, 5_000, 300), (500_000, 15_000, 485_000, 500_000));
-        assert_eq!(resolve(1_000_000, 7_000, 300), (700_000, 21_000, 679_000, 300_000));
-        assert_eq!(resolve(1_000_000, 10_000, 300), (1_000_000, 30_000, 970_000, 0));
+        assert_eq!(
+            resolve(1_000_000, 5_000, 300),
+            (500_000, 15_000, 485_000, 500_000)
+        );
+        assert_eq!(
+            resolve(1_000_000, 7_000, 300),
+            (700_000, 21_000, 679_000, 300_000)
+        );
+        assert_eq!(
+            resolve(1_000_000, 10_000, 300),
+            (1_000_000, 30_000, 970_000, 0)
+        );
         assert_eq!(resolve(3, 3_333, 300), (0, 0, 0, 3));
 
         // Release split: one fee on the full amount, first winner takes dust.

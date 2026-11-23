@@ -8,6 +8,7 @@ use soroban_sdk::{
 
 use super::setup::*;
 use crate::{BountyEscrow, BountyEscrowClient, DataKey, Error, TokenLimits};
+use soroban_sdk::Event as _;
 
 #[test]
 fn init_once() {
@@ -22,18 +23,25 @@ fn init_once() {
 
 #[test]
 fn init_emits_initialized_event() {
-    let c = Ctx::new();
-    let a = Address::generate(&c.env);
-    c.client.try_init(&a, &a, &a, &a, &300, &DAY, &DAY, &(90 * DAY)).unwrap();
-    let events = c.env.events().all().events();
-    let init_events: Vec<_> = events
-        .iter()
-        .filter(|e| {
-            !e.topics.is_empty()
-                && e.topics[0] == soroban_sdk::Symbol::new(&c.env, "bounty")
-        })
-        .collect();
-    assert_eq!(init_events.len(), 1);
+    let env = soroban_sdk::Env::default();
+    env.mock_all_auths();
+    let id = env.register(BountyEscrow, ());
+    let client = BountyEscrowClient::new(&env, &id);
+    let a = Address::generate(&env);
+    client.init(&a, &a, &a, &a, &300, &DAY, &DAY, &(90 * DAY));
+    let expected = crate::events::Initialized {
+        admin: a.clone(),
+        relayer: a.clone(),
+        arbiter: a.clone(),
+        treasury: a.clone(),
+        fee_bps: 300,
+        grace_secs: DAY,
+        min_duration_secs: DAY,
+        max_duration_secs: 90 * DAY,
+        paused: false,
+    };
+    let all = env.events().all();
+    assert!(all.events().contains(&expected.to_xdr(&env, &id)));
 }
 
 #[test]
@@ -85,7 +93,8 @@ fn fee_change_does_not_affect_existing_bounties() {
 fn token_limit_change_only_affects_new_bounties() {
     let c = Ctx::new();
     let id = c.fund_with(1, 400 * UNIT, true);
-    c.client.set_token(&c.admin, &c.token, &UNIT, &100 * UNIT);
+    c.client
+        .set_token(&c.admin, &c.token, &UNIT, &(100 * UNIT), &None);
     c.set_time(c.now() + 7 * DAY + GRACE);
     c.client.refund(&c.maintainer, &id);
     let result = c.client.try_fund_bounty(
@@ -292,8 +301,9 @@ fn token_changes_emit_dedicated_events() {
         .register_stellar_asset_contract_v2(Address::generate(&c.env))
         .address();
     c.client.set_token(&c.admin, &token, &1, &UNIT, &None);
+    assert!(!c.env.events().all().events().is_empty());
     c.client.remove_token(&c.admin, &token);
-    assert!(c.env.events().all().events().len() >= 2);
+    assert!(!c.env.events().all().events().is_empty());
 }
 
 #[test]
@@ -446,7 +456,8 @@ fn legacy_instance_token_is_read_until_rewritten_to_persistent_storage() {
         );
     });
     assert_eq!(c.client.get_token(&legacy).unwrap().max_amount, UNIT);
-    c.client.set_token(&c.admin, &legacy, &2, &(2 * UNIT));
+    c.client
+        .set_token(&c.admin, &legacy, &2, &(2 * UNIT), &None);
     assert_eq!(c.client.get_token(&legacy).unwrap().min_amount, 2);
 }
 

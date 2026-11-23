@@ -22,6 +22,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **`CHANGELOG.md`**: Initial interface changelog tracking breaking changes, entry points, errors, and events across contract releases (#121).
 
 ### Changed
+- **BREAKING (interface):** `set_token` takes a fifth argument, `fee_bps: Option<u32>`, a per-token fee override (rejected above `MAX_FEE_BPS` with `InvalidFee`). Bindings must be regenerated.
+- **BREAKING (interface):** `release`, `release_split` is unchanged, but `release` now returns `ReleaseSettlement { net, fee, deferred }`, `refund` returns `RefundSettlement { amount }`, and `resolve` and `resolve_with_evidence` return `ResolveSettlement { winner_net, fee, maintainer_amount, winner_deferred }`.
+- **Behaviour:** release and resolve fees accrue to `Totals.accrued_fees` and are paid out with `withdraw_fees`, instead of being sent to the treasury immediately. The fee is snapshotted at funding from the token override, or the global `fee_bps` when there is none.
+- **Behaviour:** `init` publishes the `initialized` event, and `set_token` rejects a non-positive minimum or `max < min` with `InvalidLimits`.
+- **Internal:** the entry-point bodies moved out of `lib.rs` into `admin.rs` and `bounty.rs`. The contract spec is unchanged by that move.
+- **Repair:** the default branch did not compile after merge damage to `fund_bounty`, `refund`, `init` and `set_token`. Restored `withdraw_fees`, `bounty_count`, `get_bounties`, `quote_*`, `bump` and `upgrade` from earlier commits.
 - Restored and expanded complete contract specification in `docs/CONTRACT.md`, including sequence diagrams, 36 entry points, 31 errors, and worked fee calculation examples.
 
 ---

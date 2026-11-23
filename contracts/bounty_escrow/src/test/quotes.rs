@@ -7,6 +7,9 @@ use crate::{
 #[test]
 fn quote_release_matches_real_release_payout() {
     let c = Ctx::new();
+    // Small amounts below: the default token floor is 1 UNIT, so lower it for dust cases.
+    c.client
+        .set_token(&c.admin, &c.token, &1, &(500 * UNIT), &None);
 
     // Test across several amounts including dust edge cases
     let amounts = [1, 2, 7, 33, 34, 100, 999, 10_000, 100 * UNIT];
@@ -27,10 +30,13 @@ fn quote_release_matches_real_release_payout() {
 #[test]
 fn quote_resolve_matches_real_resolve_payout() {
     let c = Ctx::new();
+    // Small amounts below: the default token floor is 1 UNIT, so lower it for dust cases.
+    c.client
+        .set_token(&c.admin, &c.token, &1, &(500 * UNIT), &None);
 
     // Amounts, splits (winner_bps), dust cases
     let cases = [
-        (100 * UNIT, 5_000u32), // 50%
+        (100 * UNIT, 5_000u32),  // 50%
         (100 * UNIT, 10_000u32), // 100%
         (100 * UNIT, 0u32),      // 0%
         (33, 3_333u32),          // Dust case 1
@@ -52,9 +58,7 @@ fn quote_resolve_matches_real_resolve_payout() {
         } else {
             None
         };
-        let settlement = c
-            .client
-            .resolve(&c.arbiter, &id, &winner_opt, &winner_bps);
+        let settlement = c.client.resolve(&c.arbiter, &id, &winner_opt, &winner_bps);
 
         assert_eq!(q_winner_net, settlement.winner_net);
         assert_eq!(q_fee, settlement.fee);
@@ -67,7 +71,13 @@ fn quote_resolve_matches_real_resolve_payout() {
 fn quote_fee_pre_funding_preview() {
     let c = Ctx::new();
 
-    for &(amount, fee_bps) in &[(100 * UNIT, 300u32), (1_000, 100u32), (33, 300u32), (34, 300u32), (0, 300u32)] {
+    for &(amount, fee_bps) in &[
+        (100 * UNIT, 300u32),
+        (1_000, 100u32),
+        (33, 300u32),
+        (34, 300u32),
+        (0, 300u32),
+    ] {
         let (net, fee) = c.client.quote_fee(&amount, &fee_bps);
         let expected_fee = fees::fee(amount, fee_bps).unwrap();
         let expected_net = fees::net(amount, fee_bps).unwrap();

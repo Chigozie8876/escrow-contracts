@@ -1,5 +1,7 @@
 #![no_std]
 
+mod admin;
+mod bounty;
 mod errors;
 mod events;
 mod fees;
@@ -18,11 +20,16 @@ use soroban_sdk::{
 
 pub use errors::Error;
 pub use types::{Bounty, Config, DataKey, SplitPayout, Status, TokenLimits, Totals, WinnerShare};
-use types::{ClaimRecord, DisputeRecord, PendingUpgrade, RelayerLimit};
+use types::{
+    ClaimRecord, DisputeRecord, PendingUpgrade, RefundSettlement, RelayerLimit, ReleaseSettlement,
+    ResolveSettlement,
+};
 
 /// Top-ups per bounty. Bounds storage and event volume.
 const MAX_TOP_UPS: u32 = 10;
 const MAX_WINNERS: u32 = 5;
+/// Largest id batch accepted by the permissionless `bump` keeper call.
+pub const MAX_BUMP_LIMIT: u32 = 50;
 
 #[contract]
 pub struct BountyEscrow;
@@ -62,7 +69,12 @@ fn undefer(env: &Env, token: &Address, net: i128) -> Result<(), Error> {
     Ok(())
 }
 
-fn authorize_release(env: &Env, caller: &Address, b: &Bounty, cfg: &Config) -> Result<bool, Error> {
+fn authorize_release(
+    _env: &Env,
+    caller: &Address,
+    b: &Bounty,
+    cfg: &Config,
+) -> Result<bool, Error> {
     if *caller == b.maintainer {
         return Ok(false);
     }
@@ -109,7 +121,10 @@ impl BountyEscrow {
     /// - `Error::AlreadyInitialized`: Contract was already initialized.
     /// - `Error::InvalidFee`: `fee_bps` exceeds maximum permitted ceiling (1,000 bps).
     /// - `Error::InvalidDeadline`: `min_duration_secs` is greater than `max_duration_secs`.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "entry point signature is fixed by the contract ABI"
+    )]
     pub fn init(
         env: Env,
         admin: Address,
@@ -121,31 +136,17 @@ impl BountyEscrow {
         min_duration_secs: u64,
         max_duration_secs: u64,
     ) -> Result<(), Error> {
-        admin.require_auth();
-        if storage::has_config(&env) {
-            return Err(Error::AlreadyInitialized);
-        }
-        if fee_bps > fees::MAX_FEE_BPS {
-            return Err(Error::InvalidFee);
-        }
-        if min_duration_secs > max_duration_secs {
-            return Err(Error::InvalidDeadline);
-        }
-        storage::set_config(
-            &env,
-            &Config {
-                admin,
-                relayer,
-                arbiter,
-                treasury,
-                fee_bps,
-                grace_secs,
-                min_duration_secs,
-                max_duration_secs,
-                paused: false,
-            },
-        );
-        Ok(())
+        admin::init(
+            env,
+            admin,
+            relayer,
+            arbiter,
+            treasury,
+            fee_bps,
+            grace_secs,
+            min_duration_secs,
+            max_duration_secs,
+        )
     }
 
     /// Escrows tokens for a GitHub issue bounty and transitions status to `Open`.
@@ -170,7 +171,10 @@ impl BountyEscrow {
     /// - `Error::InvalidDeadline`: Deadline is outside allowed min/max duration window.
     /// - `Error::IssueAlreadyFunded`: An active bounty already exists for this repo and issue.
     /// - `Error::Overflow`: Arithmetic overflow calculating timestamp windows or token totals.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "entry point signature is fixed by the contract ABI"
+    )]
     pub fn fund_bounty(
         env: Env,
         maintainer: Address,
@@ -181,77 +185,16 @@ impl BountyEscrow {
         deadline: u64,
         relayer_allowed: bool,
     ) -> Result<u64, Error> {
-        maintainer.require_auth();
-        let cfg = storage::get_config(&env)?;
-        if cfg.paused {
-            return Err(Error::Paused);
-        }
-        let limits = storage::get_token(&env, &token).ok_or(Error::TokenNotAllowed)?;
-        if amount < limits.min_amount {
-            return Err(Error::AmountTooSmall);
-        }
-        if amount > limits.max_amount {
-            return Err(Error::AmountTooLarge);
-        }
-        let now = env.ledger().timestamp();
-        let earliest = now
-            .checked_add(cfg.min_duration_secs)
-            .ok_or(Error::Overflow)?;
-        let latest = now
-            .checked_add(cfg.max_duration_secs)
-            .ok_or(Error::Overflow)?;
-        if deadline < earliest || deadline > latest {
-            return Err(Error::InvalidDeadline);
-        }
-        if storage::active_bounty(&env, repo_id, issue).is_some() {
-            return Err(Error::IssueAlreadyFunded);
-        }
-
-        let id = storage::next_id(&env);
-        storage::set_bounty(
-            &env,
-            &Bounty {
-                id,
-                maintainer: maintainer.clone(),
-                repo_id,
-                issue,
-                token: token.clone(),
-                amount,
-                fee_bps,
-                fee_bps: policy.fee_bps,
-                grace_secs: policy.grace_secs,
-                fee_bps: cfg.fee_bps,
-                deadline,
-                relayer_allowed,
-                status: Status::Open,
-                winner: None,
-                created_at: now,
-            },
-        );
-        storage::set_active(&env, repo_id, issue, id);
-        let mut t = storage::get_totals(&env, &token);
-        t.funded = add(t.funded, amount)?;
-        t.held = add(t.held, amount)?;
-        storage::set_totals(&env, &token, &t);
-
-        token::Client::new(&env, &token).transfer(
-            &maintainer,
-            env.current_contract_address(),
-            &amount,
-        );
-        events::Funded {
-            id,
+        bounty::fund_bounty(
+            env,
             maintainer,
             repo_id,
             issue,
             token,
             amount,
-            fee_bps: cfg.fee_bps,
             deadline,
             relayer_allowed,
-        }
-        .publish(&env);
-        Ok(id)
+        )
     }
 
     /// Releases an open bounty to a single recipient (`winner`), deducting the snapshotted platform fee.
@@ -280,66 +223,8 @@ impl BountyEscrow {
         caller: Address,
         bounty_id: u64,
         winner: Address,
-    ) -> Result<(), Error> {
-        caller.require_auth();
-        let cfg = storage::get_config(&env)?;
-        let mut b = storage::get_bounty(&env, bounty_id)?;
-        if b.status != Status::Open {
-            return Err(Error::InvalidStatus);
-        }
-        if authorize_release(&env, &caller, &b, &cfg)? {
-            charge_relayer(&env, &b.token, b.amount)?;
-        }
-        if winner == b.maintainer || winner == env.current_contract_address() {
-            return Err(Error::SelfPayout);
-        }
-        let fee = fees::fee(b.amount, b.fee_bps)?;
-        let net = fees::net(b.amount, b.fee_bps)?;
-
-        b.status = Status::Released;
-        b.winner = Some(winner.clone());
-        storage::set_bounty(&env, &b);
-        storage::clear_active(&env, b.repo_id, b.issue);
-
-        let tok = token::Client::new(&env, &b.token);
-        let me = env.current_contract_address();
-        // A winner with no trustline must not revert the release. The net stays in the contract as a
-        // claim the winner can collect once the trustline exists.
-        let paid = matches!(tok.try_transfer(&me, &winner, &net), Ok(Ok(())));
-        if !paid {
-            storage::set_claim(
-                &env,
-                bounty_id,
-                &ClaimRecord {
-                    winner: winner.clone(),
-                    net,
-                    claimed: false,
-                },
-            );
-            defer(&env, &b.token, net)?;
-        }
-
-        let mut t = storage::get_totals(&env, &b.token);
-        if paid {
-            t.released_net = add(t.released_net, net)?;
-        }
-        t.fees = add(t.fees, fee)?;
-        t.held = sub(t.held, b.amount)?;
-        storage::set_totals(&env, &b.token, &t);
-
-        if fee > 0 {
-            tok.transfer(&me, &cfg.treasury, &fee);
-        }
-        events::Released {
-            id: bounty_id,
-            winner,
-            net,
-            fee,
-            caller,
-            deferred: !paid,
-        }
-        .publish(&env);
-        Ok(())
+    ) -> Result<ReleaseSettlement, Error> {
+        bounty::release(env, caller, bounty_id, winner)
     }
 
     /// Releases an open bounty divided among multiple winners according to basis-point shares.
@@ -373,89 +258,7 @@ impl BountyEscrow {
         bounty_id: u64,
         winners: Vec<WinnerShare>,
     ) -> Result<(), Error> {
-        caller.require_auth();
-        let cfg = storage::get_config(&env)?;
-        let mut b = storage::get_bounty(&env, bounty_id)?;
-        if b.status != Status::Open {
-            return Err(Error::InvalidStatus);
-        }
-        if winners.is_empty() || winners.len() > MAX_WINNERS {
-            return Err(Error::InvalidWinners);
-        }
-        if authorize_release(&env, &caller, &b, &cfg)? {
-            charge_relayer(&env, &b.token, b.amount)?;
-        }
-
-        let mut total_bps = 0u32;
-        for i in 0..winners.len() {
-            let entry = winners.get(i).unwrap();
-            if entry.winner == b.maintainer || entry.winner == env.current_contract_address() {
-                return Err(Error::SelfPayout);
-            }
-            total_bps = total_bps
-                .checked_add(entry.share_bps)
-                .ok_or(Error::Overflow)?;
-            for j in 0..i {
-                if winners.get(j).unwrap().winner == entry.winner {
-                    return Err(Error::InvalidWinners);
-                }
-            }
-        }
-        if total_bps != 10_000 {
-            return Err(Error::InvalidSplit);
-        }
-
-        let fee = fees::fee(b.amount, b.fee_bps)?;
-        let net = sub(b.amount, fee)?;
-        let mut payouts = Vec::new(&env);
-        let mut paid = 0i128;
-        for i in 0..winners.len() {
-            let entry = winners.get(i).unwrap();
-            let amount = if i == 0 {
-                0
-            } else {
-                fees::share(net, entry.share_bps)?
-            };
-            paid = add(paid, amount)?;
-            payouts.push_back(SplitPayout {
-                winner: entry.winner,
-                amount,
-            });
-        }
-        let first = winners.get(0).unwrap();
-        payouts.set(
-            0,
-            SplitPayout {
-                winner: first.winner,
-                amount: sub(net, paid)?,
-            },
-        );
-
-        b.status = Status::Released;
-        b.winner = None;
-        storage::set_bounty(&env, &b);
-        storage::clear_active(&env, b.repo_id, b.issue);
-        let tok = token::Client::new(&env, &b.token);
-        let me = env.current_contract_address();
-        for payout in payouts.iter() {
-            tok.transfer(&me, &payout.winner, &payout.amount);
-        }
-        if fee > 0 {
-            tok.transfer(&me, &cfg.treasury, &fee);
-        }
-        let mut totals = storage::get_totals(&env, &b.token);
-        totals.released_net = add(totals.released_net, net)?;
-        totals.fees = add(totals.fees, fee)?;
-        totals.held = sub(totals.held, b.amount)?;
-        storage::set_totals(&env, &b.token, &totals);
-        events::ReleasedSplit {
-            id: bounty_id,
-            payouts,
-            fee,
-            caller,
-        }
-        .publish(&env);
-        Ok(())
+        bounty::release_split(env, caller, bounty_id, winners)
     }
 
     /// Refunds the entire bounty amount back to the maintainer without fees after the deadline and grace period have elapsed.
@@ -475,44 +278,12 @@ impl BountyEscrow {
     /// - `Error::InvalidStatus`: Bounty status is not `Status::Open`.
     /// - `Error::DeadlineNotReached`: Current time is before `deadline + grace_secs`.
     /// - `Error::Overflow`: Arithmetic overflow on timestamp addition or accounting totals.
-    pub fn refund(env: Env, maintainer: Address, bounty_id: u64) -> Result<(), Error> {
-        maintainer.require_auth();
-        let cfg = storage::get_config(&env)?;
-        let mut b = storage::get_bounty(&env, bounty_id)?;
-        if maintainer != b.maintainer {
-            return Err(Error::Unauthorized);
-        }
-        if b.status != Status::Open {
-            return Err(Error::InvalidStatus);
-        }
-        // #163: use the grace snapshotted at funding time, not the live config value.
-        let opens = b.deadline.checked_add(b.grace_secs).ok_or(Error::Overflow)?;
-        let opens = b
-            .deadline
-            .checked_add(cfg.grace_secs)
-            .ok_or(Error::Overflow)?;
-        if env.ledger().timestamp() < opens {
-            return Err(Error::DeadlineNotReached);
-        }
-        b.status = Status::Refunded;
-        storage::set_bounty(&env, &b);
-        storage::clear_active(&env, b.repo_id, b.issue);
-        let mut t = storage::get_totals(&env, &b.token);
-        t.refunded = add(t.refunded, b.amount)?;
-        t.held = sub(t.held, b.amount)?;
-        storage::set_totals(&env, &b.token, &t);
-
-        token::Client::new(&env, &b.token).transfer(
-            &env.current_contract_address(),
-            &b.maintainer,
-            &b.amount,
-        );
-        events::Refunded {
-            id: bounty_id,
-            amount: b.amount,
-        }
-        .publish(&env);
-        Ok(RefundSettlement { amount: b.amount })
+    pub fn refund(
+        env: Env,
+        maintainer: Address,
+        bounty_id: u64,
+    ) -> Result<RefundSettlement, Error> {
+        bounty::refund(env, maintainer, bounty_id)
     }
 
     /// Returns the exact ledger timestamp at which a bounty becomes eligible for `refund`.
@@ -528,9 +299,7 @@ impl BountyEscrow {
     /// - `Error::BountyNotFound`: Bounty does not exist.
     /// - `Error::Overflow`: Arithmetic overflow calculating `deadline + grace_secs`.
     pub fn refundable_at(env: Env, bounty_id: u64) -> Result<u64, Error> {
-        let bounty = storage::get_bounty(&env, bounty_id)?;
-        // #163: use the grace snapshotted at funding time.
-        bounty.deadline.checked_add(bounty.grace_secs).ok_or(Error::Overflow)
+        bounty::refundable_at(env, bounty_id)
     }
 
     /// Freezes release and refund operations on an open bounty, transitioning status to `Disputed`.
@@ -549,34 +318,7 @@ impl BountyEscrow {
     /// - `Error::InvalidStatus`: Bounty status is not `Status::Open`.
     /// - `Error::DisputeAlreadyUsed`: Bounty was already disputed previously.
     pub fn open_dispute(env: Env, caller: Address, bounty_id: u64) -> Result<(), Error> {
-        caller.require_auth();
-        let cfg = storage::get_config(&env)?;
-        let mut b = storage::get_bounty(&env, bounty_id)?;
-        if caller != b.maintainer && caller != cfg.arbiter {
-            return Err(Error::Unauthorized);
-        }
-        if b.status != Status::Open {
-            return Err(Error::InvalidStatus);
-        }
-        // One dispute per bounty. An expired dispute returns to Open, so this stops it being reopened in a loop.
-        if storage::get_dispute(&env, bounty_id).is_some() {
-            return Err(Error::DisputeAlreadyUsed);
-        }
-        storage::set_dispute(
-            &env,
-            bounty_id,
-            &DisputeRecord {
-                opened_at: env.ledger().timestamp(),
-            },
-        );
-        b.status = Status::Disputed;
-        storage::set_bounty(&env, &b);
-        events::Disputed {
-            id: bounty_id,
-            caller,
-        }
-        .publish(&env);
-        Ok(())
+        bounty::open_dispute(env, caller, bounty_id)
     }
 
     /// Resolves an active dispute by allocating funds between a winner and the maintainer.
@@ -608,8 +350,8 @@ impl BountyEscrow {
         bounty_id: u64,
         winner: Option<Address>,
         winner_bps: u32,
-    ) -> Result<(), Error> {
-        settle(&env, arbiter, bounty_id, winner, winner_bps, None)
+    ) -> Result<ResolveSettlement, Error> {
+        bounty::resolve(env, arbiter, bounty_id, winner, winner_bps)
     }
 
     /// Resolves an active dispute identical to `resolve`, while anchoring a 32-byte evidence bundle hash on-chain.
@@ -637,15 +379,8 @@ impl BountyEscrow {
         winner: Option<Address>,
         winner_bps: u32,
         evidence_hash: BytesN<32>,
-    ) -> Result<(), Error> {
-        settle(
-            &env,
-            arbiter,
-            bounty_id,
-            winner,
-            winner_bps,
-            Some(evidence_hash),
-        )
+    ) -> Result<ResolveSettlement, Error> {
+        bounty::resolve_with_evidence(env, arbiter, bounty_id, winner, winner_bps, evidence_hash)
     }
 
     /// Extends the deadline of an open bounty to a later timestamp.
@@ -672,36 +407,7 @@ impl BountyEscrow {
         bounty_id: u64,
         new_deadline: u64,
     ) -> Result<(), Error> {
-        maintainer.require_auth();
-        let cfg = storage::get_config(&env)?;
-        let mut b = storage::get_bounty(&env, bounty_id)?;
-        if maintainer != b.maintainer {
-            return Err(Error::Unauthorized);
-        }
-        if b.status != Status::Open {
-            return Err(Error::InvalidStatus);
-        }
-        if new_deadline <= b.deadline {
-            return Err(Error::InvalidDeadline);
-        }
-        let latest = env
-            .ledger()
-            .timestamp()
-            .checked_add(cfg.max_duration_secs)
-            .ok_or(Error::Overflow)?;
-        if new_deadline > latest {
-            return Err(Error::InvalidDeadline);
-        }
-        let old_deadline = b.deadline;
-        b.deadline = new_deadline;
-        storage::set_bounty(&env, &b);
-        events::DeadlineExtended {
-            id: bounty_id,
-            old_deadline,
-            new_deadline,
-        }
-        .publish(&env);
-        Ok(())
+        bounty::extend_deadline(env, maintainer, bounty_id, new_deadline)
     }
 
     /// Adds additional tokens to an existing open bounty while preserving its initial snapshotted fee.
@@ -730,53 +436,7 @@ impl BountyEscrow {
     /// - `Error::AmountTooLarge`: Cumulative amount exceeds token's maximum deposit limit.
     /// - `Error::Overflow`: Arithmetic overflow adding funds or updating totals.
     pub fn top_up(env: Env, maintainer: Address, bounty_id: u64, extra: i128) -> Result<(), Error> {
-        maintainer.require_auth();
-        let cfg = storage::get_config(&env)?;
-        if cfg.paused {
-            return Err(Error::Paused);
-        }
-        let mut b = storage::get_bounty(&env, bounty_id)?;
-        if maintainer != b.maintainer {
-            return Err(Error::Unauthorized);
-        }
-        if b.status != Status::Open {
-            return Err(Error::InvalidStatus);
-        }
-        if extra <= 0 {
-            return Err(Error::AmountTooSmall);
-        }
-        // A token removed from the allowlist can no longer be topped up. Release and refund still work.
-        let limits = storage::get_token(&env, &b.token).ok_or(Error::TokenNotAllowed)?;
-        let uses = storage::get_top_ups(&env, bounty_id);
-        if uses >= MAX_TOP_UPS {
-            return Err(Error::TopUpLimitReached);
-        }
-        let new_amount = add(b.amount, extra)?;
-        // The per-token cap applies to the total, so a top-up cannot exceed it.
-        if new_amount > limits.max_amount {
-            return Err(Error::AmountTooLarge);
-        }
-
-        b.amount = new_amount;
-        storage::set_bounty(&env, &b);
-        storage::set_top_ups(&env, bounty_id, uses + 1);
-        let mut t = storage::get_totals(&env, &b.token);
-        t.funded = add(t.funded, extra)?;
-        t.held = add(t.held, extra)?;
-        storage::set_totals(&env, &b.token, &t);
-
-        token::Client::new(&env, &b.token).transfer(
-            &maintainer,
-            env.current_contract_address(),
-            &extra,
-        );
-        events::ToppedUp {
-            id: bounty_id,
-            extra,
-            new_amount,
-        }
-        .publish(&env);
-        Ok(())
+        bounty::top_up(env, maintainer, bounty_id, extra)
     }
 
     /// Returns a timed-out disputed bounty back to `Status::Open` without deciding a winner.
@@ -795,23 +455,7 @@ impl BountyEscrow {
     /// - `Error::DisputeNotExpired`: Current timestamp is before dispute timeout expiration.
     /// - `Error::Overflow`: Arithmetic overflow calculating timeout deadline.
     pub fn expire_dispute(env: Env, caller: Address, bounty_id: u64) -> Result<(), Error> {
-        caller.require_auth();
-        let mut b = storage::get_bounty(&env, bounty_id)?;
-        if b.status != Status::Disputed {
-            return Err(Error::InvalidStatus);
-        }
-        let record = storage::get_dispute(&env, bounty_id).ok_or(Error::InvalidStatus)?;
-        let ready = record
-            .opened_at
-            .checked_add(storage::dispute_timeout(&env))
-            .ok_or(Error::Overflow)?;
-        if env.ledger().timestamp() < ready {
-            return Err(Error::DisputeNotExpired);
-        }
-        b.status = Status::Open;
-        storage::set_bounty(&env, &b);
-        events::DisputeExpired { id: bounty_id }.publish(&env);
-        Ok(())
+        bounty::expire_dispute(env, caller, bounty_id)
     }
 
     /// Pays out a deferred net amount to a winner whose transfer previously failed (e.g. missing trustline).
@@ -831,34 +475,7 @@ impl BountyEscrow {
     /// - `Error::Unauthorized`: Caller does not match the recorded claim recipient.
     /// - `Error::Overflow`: Arithmetic overflow updating totals.
     pub fn claim(env: Env, winner: Address, bounty_id: u64) -> Result<(), Error> {
-        winner.require_auth();
-        let mut record = storage::get_claim(&env, bounty_id).ok_or(Error::NothingToClaim)?;
-        if record.claimed {
-            return Err(Error::AlreadyClaimed);
-        }
-        if record.winner != winner {
-            return Err(Error::Unauthorized);
-        }
-        let b = storage::get_bounty(&env, bounty_id)?;
-        record.claimed = true;
-        storage::set_claim(&env, bounty_id, &record);
-        undefer(&env, &b.token, record.net)?;
-        let mut t = storage::get_totals(&env, &b.token);
-        t.released_net = add(t.released_net, record.net)?;
-        storage::set_totals(&env, &b.token, &t);
-
-        token::Client::new(&env, &b.token).transfer(
-            &env.current_contract_address(),
-            &winner,
-            &record.net,
-        );
-        events::Claimed {
-            id: bounty_id,
-            winner,
-            net: record.net,
-        }
-        .publish(&env);
-        Ok(())
+        bounty::claim(env, winner, bounty_id)
     }
 
     /// Retrieves full details for a bounty by its identifier.
@@ -872,7 +489,7 @@ impl BountyEscrow {
     /// # Errors
     /// - `Error::BountyNotFound`: Bounty does not exist in storage.
     pub fn get_bounty(env: Env, id: u64) -> Result<Bounty, Error> {
-        storage::get_bounty(&env, id)
+        bounty::get_bounty(env, id)
     }
 
     /// Queries the active bounty identifier for a GitHub repository and issue pair, if one is open.
@@ -886,7 +503,7 @@ impl BountyEscrow {
     /// # Errors
     /// Returns `None` if no active bounty is open for the specified issue; never reverts.
     pub fn active_bounty(env: Env, repo_id: u64, issue: u64) -> Option<u64> {
-        storage::active_bounty(&env, repo_id, issue)
+        bounty::active_bounty(env, repo_id, issue)
     }
 
     /// Returns the global contract configuration parameters and role addresses.
@@ -900,7 +517,7 @@ impl BountyEscrow {
     /// # Errors
     /// - `Error::NotInitialized`: Contract has not yet been initialized.
     pub fn get_config(env: Env) -> Result<Config, Error> {
-        storage::get_config(&env)
+        bounty::get_config(env)
     }
 
     /// Returns the cumulative token accounting metrics (funded, released_net, fees, refunded, held).
@@ -914,7 +531,7 @@ impl BountyEscrow {
     /// # Errors
     /// Returns zeroed totals if no operations have occurred for the token; never reverts.
     pub fn get_totals(env: Env, token: Address) -> Totals {
-        storage::get_totals(&env, &token)
+        bounty::get_totals(env, token)
     }
 
     /// Returns allowlist limits (minimum and maximum deposit bounds) for a token address.
@@ -928,7 +545,7 @@ impl BountyEscrow {
     /// # Errors
     /// Returns `None` if the token is not allowlisted; never reverts.
     pub fn get_token(env: Env, token: Address) -> Option<TokenLimits> {
-        storage::get_token(&env, &token)
+        bounty::get_token(env, token)
     }
 
     // ---- admin ----
@@ -954,24 +571,9 @@ impl BountyEscrow {
         token: Address,
         min: i128,
         max: i128,
+        fee_bps: Option<u32>,
     ) -> Result<(), Error> {
-        require_admin(&env, &admin)?;
-        if min <= 0 {
-            return Err(Error::AmountTooSmall);
-        }
-        if max < min {
-            return Err(Error::AmountTooLarge);
-        }
-        storage::set_token(
-            &env,
-            &token,
-            &TokenLimits {
-                min_amount: min,
-                max_amount: max,
-            },
-        );
-        changed(&env, symbol_short!("token"));
-        Ok(())
+        admin::set_token(env, admin, token, min, max, fee_bps)
     }
 
     /// Removes a token contract address from the allowlist, preventing new funding and top-ups.
@@ -988,13 +590,7 @@ impl BountyEscrow {
     /// - `Error::Unauthorized`: Caller is not the admin.
     /// - `Error::TokenNotAllowed`: Token is not currently on the allowlist.
     pub fn remove_token(env: Env, admin: Address, token: Address) -> Result<(), Error> {
-        require_admin(&env, &admin)?;
-        if storage::get_token(&env, &token).is_none() {
-            return Err(Error::TokenNotAllowed);
-        }
-        storage::remove_token(&env, &token);
-        changed(&env, symbol_short!("token"));
-        Ok(())
+        admin::remove_token(env, admin, token)
     }
 
     /// Updates the global platform fee in basis points applied to future bounties.
@@ -1011,14 +607,7 @@ impl BountyEscrow {
     /// - `Error::Unauthorized`: Caller is not the admin.
     /// - `Error::InvalidFee`: `fee_bps > 1000`.
     pub fn set_fee(env: Env, admin: Address, fee_bps: u32) -> Result<(), Error> {
-        let mut c = require_admin(&env, &admin)?;
-        if fee_bps > fees::MAX_FEE_BPS {
-            return Err(Error::InvalidFee);
-        }
-        c.fee_bps = fee_bps;
-        storage::set_config(&env, &c);
-        changed(&env, symbol_short!("fee"));
-        Ok(())
+        admin::set_fee(env, admin, fee_bps)
     }
 
     /// Updates the authorized relayer address for automated bounty releases.
@@ -1033,11 +622,7 @@ impl BountyEscrow {
     /// - `Error::NotInitialized`: Contract has not been initialized.
     /// - `Error::Unauthorized`: Caller is not the admin.
     pub fn set_relayer(env: Env, admin: Address, relayer: Address) -> Result<(), Error> {
-        let mut c = require_admin(&env, &admin)?;
-        c.relayer = relayer;
-        storage::set_config(&env, &c);
-        changed(&env, symbol_short!("relayer"));
-        Ok(())
+        admin::set_relayer(env, admin, relayer)
     }
 
     /// Updates the authorized arbiter address for opening and resolving disputes.
@@ -1052,11 +637,7 @@ impl BountyEscrow {
     /// - `Error::NotInitialized`: Contract has not been initialized.
     /// - `Error::Unauthorized`: Caller is not the admin.
     pub fn set_arbiter(env: Env, admin: Address, arbiter: Address) -> Result<(), Error> {
-        let mut c = require_admin(&env, &admin)?;
-        c.arbiter = arbiter;
-        storage::set_config(&env, &c);
-        changed(&env, symbol_short!("arbiter"));
-        Ok(())
+        admin::set_arbiter(env, admin, arbiter)
     }
 
     /// Updates the platform treasury address receiving deducted release fees.
@@ -1071,11 +652,7 @@ impl BountyEscrow {
     /// - `Error::NotInitialized`: Contract has not been initialized.
     /// - `Error::Unauthorized`: Caller is not the admin.
     pub fn set_treasury(env: Env, admin: Address, treasury: Address) -> Result<(), Error> {
-        let mut c = require_admin(&env, &admin)?;
-        c.treasury = treasury;
-        storage::set_config(&env, &c);
-        changed(&env, symbol_short!("treasury"));
-        Ok(())
+        admin::set_treasury(env, admin, treasury)
     }
 
     /// Updates the default grace period (in seconds) applied to newly funded bounties before refund.
@@ -1090,11 +667,7 @@ impl BountyEscrow {
     /// - `Error::NotInitialized`: Contract has not been initialized.
     /// - `Error::Unauthorized`: Caller is not the admin.
     pub fn set_grace(env: Env, admin: Address, grace_secs: u64) -> Result<(), Error> {
-        let mut c = require_admin(&env, &admin)?;
-        c.grace_secs = grace_secs;
-        storage::set_config(&env, &c);
-        changed(&env, symbol_short!("grace"));
-        Ok(())
+        admin::set_grace(env, admin, grace_secs)
     }
 
     /// Updates the minimum and maximum allowed bounty duration bounds (in seconds).
@@ -1111,15 +684,7 @@ impl BountyEscrow {
     /// - `Error::Unauthorized`: Caller is not the admin.
     /// - `Error::InvalidDeadline`: `min > max`.
     pub fn set_durations(env: Env, admin: Address, min: u64, max: u64) -> Result<(), Error> {
-        let mut c = require_admin(&env, &admin)?;
-        if min > max {
-            return Err(Error::InvalidDeadline);
-        }
-        c.min_duration_secs = min;
-        c.max_duration_secs = max;
-        storage::set_config(&env, &c);
-        changed(&env, symbol_short!("duration"));
-        Ok(())
+        admin::set_durations(env, admin, min, max)
     }
 
     /// Transfers admin authority using two-party authentication to prevent lockout from typos.
@@ -1135,12 +700,7 @@ impl BountyEscrow {
     /// - `Error::NotInitialized`: Contract has not been initialized.
     /// - `Error::Unauthorized`: Calling address is not current admin.
     pub fn set_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), Error> {
-        let mut c = require_admin(&env, &admin)?;
-        new_admin.require_auth();
-        c.admin = new_admin;
-        storage::set_config(&env, &c);
-        changed(&env, symbol_short!("admin"));
-        Ok(())
+        admin::set_admin(env, admin, new_admin)
     }
 
     /// Pauses new bounty funding and top-ups; releases, refunds, and dispute resolutions remain active.
@@ -1155,11 +715,7 @@ impl BountyEscrow {
     /// - `Error::NotInitialized`: Contract has not been initialized.
     /// - `Error::Unauthorized`: Caller is not the admin.
     pub fn pause(env: Env, admin: Address) -> Result<(), Error> {
-        let mut c = require_admin(&env, &admin)?;
-        c.paused = true;
-        storage::set_config(&env, &c);
-        events::Paused {}.publish(&env);
-        Ok(())
+        admin::pause(env, admin)
     }
 
     /// Resumes normal funding and top-up operations after being paused.
@@ -1174,11 +730,7 @@ impl BountyEscrow {
     /// - `Error::NotInitialized`: Contract has not been initialized.
     /// - `Error::Unauthorized`: Caller is not the admin.
     pub fn unpause(env: Env, admin: Address) -> Result<(), Error> {
-        let mut c = require_admin(&env, &admin)?;
-        c.paused = false;
-        storage::set_config(&env, &c);
-        events::Unpaused {}.publish(&env);
-        Ok(())
+        admin::unpause(env, admin)
     }
 
     /// Configures the timeout period (in seconds) after which an unresolved dispute may be expired.
@@ -1195,13 +747,7 @@ impl BountyEscrow {
     /// - `Error::Unauthorized`: Caller is not the admin.
     /// - `Error::InvalidDeadline`: `secs == 0`.
     pub fn set_dispute_timeout(env: Env, admin: Address, secs: u64) -> Result<(), Error> {
-        require_admin(&env, &admin)?;
-        if secs == 0 {
-            return Err(Error::InvalidDeadline);
-        }
-        storage::set_dispute_timeout(&env, secs);
-        changed(&env, symbol_short!("dispute"));
-        Ok(())
+        admin::set_dispute_timeout(env, admin, secs)
     }
 
     /// Returns the dispute timeout window in seconds (defaults to 14 days if unset).
@@ -1215,7 +761,7 @@ impl BountyEscrow {
     /// # Errors
     /// None; never reverts.
     pub fn get_dispute_timeout(env: Env) -> u64 {
-        storage::dispute_timeout(&env)
+        bounty::get_dispute_timeout(env)
     }
 
     /// Configures a rolling rate-limit window and maximum release cap for automated relayer payouts of a token.
@@ -1239,13 +785,7 @@ impl BountyEscrow {
         window_secs: u64,
         cap: i128,
     ) -> Result<(), Error> {
-        require_admin(&env, &admin)?;
-        if window_secs == 0 || cap <= 0 {
-            return Err(Error::InvalidDeadline);
-        }
-        storage::set_relayer_limit(&env, &token, &RelayerLimit { window_secs, cap });
-        changed(&env, symbol_short!("rlimit"));
-        Ok(())
+        admin::set_relayer_limit(env, admin, token, window_secs, cap)
     }
 
     /// Updates the timelock delay required before proposed contract bytecode upgrades can execute.
@@ -1262,14 +802,7 @@ impl BountyEscrow {
     /// - `Error::Unauthorized`: Caller is not the admin.
     /// - `Error::UpgradeDelayCannotDecrease`: `delay_secs` is smaller than the current delay.
     pub fn set_upgrade_delay(env: Env, admin: Address, delay_secs: u64) -> Result<(), Error> {
-        let cfg = require_admin(&env, &admin)?;
-        let current = storage::upgrade_delay(&env, cfg.max_duration_secs + cfg.grace_secs);
-        if delay_secs < current {
-            return Err(Error::UpgradeDelayCannotDecrease);
-        }
-        storage::set_upgrade_delay(&env, delay_secs);
-        changed(&env, symbol_short!("upgrade"));
-        Ok(())
+        admin::set_upgrade_delay(env, admin, delay_secs)
     }
 
     /// Proposes a new Wasm bytecode hash for contract upgrade subject to the timelock delay.
@@ -1286,24 +819,7 @@ impl BountyEscrow {
     /// - `Error::Unauthorized`: Caller is not the admin.
     /// - `Error::Overflow`: Arithmetic overflow calculating timelock ETA.
     pub fn propose_upgrade(env: Env, admin: Address, wasm_hash: BytesN<32>) -> Result<(), Error> {
-        let cfg = require_admin(&env, &admin)?;
-        let eta = env
-            .ledger()
-            .timestamp()
-            .checked_add(storage::upgrade_delay(
-                &env,
-                cfg.max_duration_secs + cfg.grace_secs,
-            ))
-            .ok_or(Error::Overflow)?;
-        storage::set_pending_upgrade(
-            &env,
-            &PendingUpgrade {
-                wasm_hash: wasm_hash.clone(),
-                eta,
-            },
-        );
-        events::UpgradeProposed { wasm_hash, eta }.publish(&env);
-        Ok(())
+        admin::propose_upgrade(env, admin, wasm_hash)
     }
 
     /// Applies a pending contract bytecode upgrade after the timelock delay has elapsed.
@@ -1322,19 +838,7 @@ impl BountyEscrow {
     /// - `Error::NoPendingUpgrade`: No upgrade is currently proposed.
     /// - `Error::UpgradeNotReady`: Timelock delay has not yet expired.
     pub fn execute_upgrade(env: Env, admin: Address) -> Result<(), Error> {
-        require_admin(&env, &admin)?;
-        let pending = storage::pending_upgrade(&env).ok_or(Error::NoPendingUpgrade)?;
-        if env.ledger().timestamp() < pending.eta {
-            return Err(Error::UpgradeNotReady);
-        }
-        storage::clear_pending_upgrade(&env);
-        env.deployer()
-            .update_current_contract(ContractExecutable::Wasm(pending.wasm_hash.clone()));
-        events::Upgraded {
-            wasm_hash: pending.wasm_hash,
-        }
-        .publish(&env);
-        Ok(())
+        admin::execute_upgrade(env, admin)
     }
 
     /// Cancels a pending contract upgrade proposal.
@@ -1351,14 +855,52 @@ impl BountyEscrow {
     /// - `Error::Unauthorized`: Caller is not the admin.
     /// - `Error::NoPendingUpgrade`: No upgrade is currently proposed.
     pub fn cancel_upgrade(env: Env, admin: Address) -> Result<(), Error> {
-        require_admin(&env, &admin)?;
-        let pending = storage::pending_upgrade(&env).ok_or(Error::NoPendingUpgrade)?;
-        storage::clear_pending_upgrade(&env);
-        events::UpgradeCancelled {
-            wasm_hash: pending.wasm_hash,
-        }
-        .publish(&env);
-        Ok(())
+        admin::cancel_upgrade(env, admin)
+    }
+
+    /// Number of bounties ever created.
+    pub fn bounty_count(env: Env) -> u64 {
+        bounty::bounty_count(env)
+    }
+
+    /// Up to `limit` bounties starting at id `start` (capped at storage::MAX_BOUNTIES_LIMIT).
+    pub fn get_bounties(env: Env, start: u64, limit: u32) -> Vec<Bounty> {
+        bounty::get_bounties(env, start, limit)
+    }
+
+    /// Moves the accrued protocol fees of `token` to the treasury. Callable by the
+    /// treasury or the admin. Returns the amount transferred.
+    pub fn withdraw_fees(env: Env, caller: Address, token: Address) -> Result<i128, Error> {
+        admin::withdraw_fees(env, caller, token)
+    }
+
+    /// Read-only fee preview for release using the bounty's snapshotted fee_bps.
+    pub fn quote_release(env: Env, bounty_id: u64) -> Result<(i128, i128), Error> {
+        bounty::quote_release(env, bounty_id)
+    }
+
+    /// Read-only fee and split preview for resolve using the bounty's snapshotted fee_bps.
+    pub fn quote_resolve(
+        env: Env,
+        bounty_id: u64,
+        winner_bps: u32,
+    ) -> Result<(i128, i128, i128), Error> {
+        bounty::quote_resolve(env, bounty_id, winner_bps)
+    }
+
+    /// Read-only fee preview for pre-funding calculations.
+    pub fn quote_fee(_env: Env, amount: i128, fee_bps: u32) -> Result<(i128, i128), Error> {
+        bounty::quote_fee(_env, amount, fee_bps)
+    }
+
+    /// Permissionless keeper bump that extends TTLs of non-terminal bounties and their active locks/totals.
+    pub fn bump(env: Env, bounty_ids: Vec<u64>) -> Result<(), Error> {
+        bounty::bump(env, bounty_ids)
+    }
+
+    /// Direct, admin-only upgrade (no timelock). Prefer propose_upgrade/execute_upgrade.
+    pub fn upgrade(env: Env, admin: Address, wasm_hash: BytesN<32>) -> Result<(), Error> {
+        admin::upgrade(env, admin, wasm_hash)
     }
 }
 
@@ -1370,7 +912,7 @@ fn settle(
     winner: Option<Address>,
     winner_bps: u32,
     evidence: Option<BytesN<32>>,
-) -> Result<(), Error> {
+) -> Result<ResolveSettlement, Error> {
     arbiter.require_auth();
     let cfg = storage::get_config(env)?;
     if arbiter != cfg.arbiter {
@@ -1431,13 +973,10 @@ fn settle(
         t.released_net = add(t.released_net, winner_net)?;
     }
     t.fees = add(t.fees, fee)?;
+    t.accrued_fees = add(t.accrued_fees, fee)?;
     t.refunded = add(t.refunded, maintainer_amount)?;
     t.held = sub(t.held, b.amount)?;
     storage::set_totals(env, &b.token, &t);
-
-    if fee > 0 {
-        tok.transfer(&me, &cfg.treasury, &fee);
-    }
     if maintainer_amount > 0 {
         tok.transfer(&me, &b.maintainer, &maintainer_amount);
     }
@@ -1458,5 +997,10 @@ fn settle(
         }
         .publish(env);
     }
-    Ok(())
+    Ok(ResolveSettlement {
+        winner_net,
+        fee,
+        maintainer_amount,
+        winner_deferred,
+    })
 }
