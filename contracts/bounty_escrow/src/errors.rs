@@ -1,6 +1,8 @@
 use soroban_sdk::contracterror;
 
-/// Stable numbering: never renumber after deploy.
+/// Stable numbering: never renumber after deploy. Pinned by
+/// `test::errors::error_codes_are_pinned` (#98) — update that test and the
+/// `docs/CONTRACT.md` error table together with any change here.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]

@@ -7,7 +7,7 @@ use soroban_sdk::{
 };
 
 use super::setup::*;
-use crate::{BountyEscrow, BountyEscrowClient, DataKey, Error, TokenLimits};
+use crate::{BountyEscrow, BountyEscrowClient, DataKey, Error, TokenLimits, Totals};
 use soroban_sdk::Event as _;
 
 #[test]
@@ -459,6 +459,51 @@ fn legacy_instance_token_is_read_until_rewritten_to_persistent_storage() {
     c.client
         .set_token(&c.admin, &legacy, &2, &(2 * UNIT), &None);
     assert_eq!(c.client.get_token(&legacy).unwrap().min_amount, 2);
+}
+
+/// #99: `get_totals` and `get_token` are read-only views. An unseen token must
+/// read as zero/`None` without ever writing a record for it, and the same
+/// goes for a token after `remove_token` — otherwise a view call could grow
+/// storage for tokens nobody configured.
+#[test]
+fn totals_and_token_views_are_pure_for_unseen_and_removed_tokens() {
+    let c = Ctx::new();
+    let unseen = Address::generate(&c.env);
+
+    assert_eq!(c.client.get_totals(&unseen), Totals::default());
+    assert_eq!(c.client.get_token(&unseen), None);
+    c.env.as_contract(&c.client.address, || {
+        assert!(!c
+            .env
+            .storage()
+            .persistent()
+            .has(&DataKey::Totals(unseen.clone())));
+        assert!(!c
+            .env
+            .storage()
+            .persistent()
+            .has(&DataKey::Token(unseen.clone())));
+        assert!(!c
+            .env
+            .storage()
+            .instance()
+            .has(&DataKey::Token(unseen.clone())));
+    });
+
+    c.client.remove_token(&c.admin, &c.token);
+    assert_eq!(c.client.get_token(&c.token), None);
+    c.env.as_contract(&c.client.address, || {
+        assert!(!c
+            .env
+            .storage()
+            .persistent()
+            .has(&DataKey::Token(c.token.clone())));
+        assert!(!c
+            .env
+            .storage()
+            .instance()
+            .has(&DataKey::Token(c.token.clone())));
+    });
 }
 
 #[test]

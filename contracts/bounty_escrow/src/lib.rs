@@ -75,6 +75,10 @@ fn authorize_release(
     b: &Bounty,
     cfg: &Config,
 ) -> Result<bool, Error> {
+    // #101: the maintainer check runs first, so if `cfg.relayer` has been
+    // set to this same address, that release takes the maintainer path —
+    // `relayer_allowed` and the relayer rate limit are not consulted at all.
+    // `SelfPayout` and every other release check still apply as normal.
     if *caller == b.maintainer {
         return Ok(false);
     }

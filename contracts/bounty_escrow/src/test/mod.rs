@@ -15,6 +15,7 @@ mod admin;
 mod bounties;
 mod budgets;
 mod dispute;
+mod errors;
 mod fund;
 mod invariants;
 mod quotes;

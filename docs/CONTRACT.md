@@ -124,7 +124,7 @@ sequenceDiagram
 | `claim(winner, id)` | the recorded winner | A deferred payout must exist (`NothingToClaim`), be unclaimed (`AlreadyClaimed`), and belong to the caller (`Unauthorized`). Pays the net. Emits `claimed`. |
 | `resolve(arbiter, id, winner: Option, winner_bps)` | arbiter | Disputed only. `portion = floor(amount*bps/10000)`, fee taken from portion, remainder to maintainer. `InvalidSplit`, `SelfPayout`, `ConflictOfInterest` (winner is the arbiter or the treasury). Works while paused. A winner transfer that fails is deferred to `claim` instead of reverting. |
 | `resolve_with_evidence(arbiter, id, winner, winner_bps, evidence_hash)` | arbiter | Same rules and errors as `resolve`. Also emits `evidence` with the 32-byte `evidence_hash`. See "Resolution evidence". |
-| `get_bounty`, `active_bounty`, `get_config`, `get_totals`, `get_token` | none | read only |
+| `get_bounty`, `active_bounty`, `get_config`, `get_totals`, `get_token` | none | read only. `get_totals` on a token with no activity returns a zero `Totals` (not an error); `get_token` returns `None` for a token that was never configured or was removed via `remove_token` — neither call writes to storage (#99). |
 | `set_token`, `remove_token`, `set_fee`, `set_relayer`, `set_arbiter`, `set_treasury`, `set_grace`, `set_durations` | admin | emit `config` or `token_set`/`token_removed` events. Token limits are persistent; reads fall back to legacy instance entries until an admin rewrites or removes them. |
 | `set_admin(admin, new_admin)` | admin and new_admin | two-party auth |
 | `pause`, `unpause` | admin | blocks `fund_bounty` only |
